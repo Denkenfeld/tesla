@@ -1,0 +1,618 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Math Meteors — single-file kid math game</title>
+  <style>
+    :root { color-scheme: dark; }
+    html,body{height:100%;margin:0;overflow:hidden;background:#070915;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;}
+    canvas{width:100vw;height:100vh;display:block;touch-action:none;}
+    .ui{
+      position:fixed; left:12px; top:10px; right:12px;
+      display:flex; gap:10px; align-items:center; justify-content:space-between;
+      pointer-events:none; user-select:none;
+    }
+    .pill{
+      pointer-events:none;
+      padding:8px 10px; border-radius:12px;
+      background:rgba(0,0,0,.35);
+      color:rgba(220,240,255,.92);
+      backdrop-filter: blur(6px);
+      font-size:13px;
+    }
+    .hint{
+      position:fixed; left:12px; bottom:10px; right:12px;
+      color:rgba(210,230,255,.85); font-size:12px; line-height:1.35;
+      user-select:none; pointer-events:none;
+      text-shadow:0 2px 12px rgba(0,0,0,.6);
+    }
+    .kbd{padding:1px 6px;border-radius:8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14)}
+  </style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="ui">
+  <div class="pill" id="leftPill">Level 1 • + / −</div>
+  <div class="pill" id="rightPill">Best 0</div>
+</div>
+<div class="hint">
+  Tap / click an answer bubble • Type the answer and press <span class="kbd">Enter</span> •
+  <span class="kbd">1</span>/<span class="kbd">2</span>/<span class="kbd">3</span> picks left/middle/right • <span class="kbd">P</span> pause • <span class="kbd">R</span> restart
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  // Canvas
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d", { alpha: false });
+
+  const leftPill = document.getElementById("leftPill");
+  const rightPill = document.getElementById("rightPill");
+
+  let W=0, H=0, DPR=1;
+  function resize(){
+    DPR = Math.max(1, Math.min(2.5, devicePixelRatio||1));
+    W = innerWidth|0; H = innerHeight|0;
+    canvas.width = (W*DPR)|0; canvas.height = (H*DPR)|0;
+    ctx.setTransform(DPR,0,0,DPR,0,0);
+  }
+  addEventListener("resize", resize, {passive:true});
+  resize();
+
+  // Helpers
+  const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+  const lerp=(a,b,t)=>a+(b-a)*t;
+  const rnd=(a=1,b=0)=>Math.random()*(a-b)+b;
+  const rndi=(a,b=0)=>(Math.random()*(a-b)+b)|0;
+  const TAU=Math.PI*2;
+
+  // Storage best score (localStorage stores key/value pairs as strings) [web:22]
+  const BEST_KEY="math_meteors_best";
+  let best = +(localStorage.getItem(BEST_KEY) || 0);
+
+  // Audio (very light)
+  let audioCtx=null, master=null;
+  function unlockAudio(){
+    if (audioCtx) return;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    audioCtx = new AC();
+    master = audioCtx.createGain();
+    master.gain.value = 0.6;
+    master.connect(audioCtx.destination);
+    beep(740, 0.02, "triangle", 0.18);
+  }
+  function beep(freq=440, dur=0.06, type="sine", vol=0.12){
+    if (!audioCtx) return;
+    const t0 = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t0);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(vol, t0+0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0+dur);
+    o.connect(g); g.connect(master);
+    o.start(t0); o.stop(t0+dur+0.02);
+  }
+
+  // Input
+  const keys = new Set();
+  addEventListener("keydown",(e)=>{
+    const k = e.key.toLowerCase();
+    keys.add(k);
+    if (["arrowup","arrowdown","arrowleft","arrowright"," "].includes(k)) e.preventDefault();
+  });
+  addEventListener("keyup",(e)=>keys.delete(e.key.toLowerCase()));
+
+  // Click/tap answers with pointerdown (works for mouse/touch/pen) [web:30]
+  let pointer = {x:W*0.5,y:H*0.5, down:false};
+  canvas.addEventListener("pointerdown",(e)=>{
+    unlockAudio();
+    pointer.down = true;
+    const r = canvas.getBoundingClientRect();
+    pointer.x = e.clientX - r.left;
+    pointer.y = e.clientY - r.top;
+    handleTap(pointer.x, pointer.y);
+    canvas.setPointerCapture?.(e.pointerId);
+  }, {passive:true});
+  canvas.addEventListener("pointermove",(e)=>{
+    const r = canvas.getBoundingClientRect();
+    pointer.x = e.clientX - r.left;
+    pointer.y = e.clientY - r.top;
+  }, {passive:true});
+  canvas.addEventListener("pointerup",()=>pointer.down=false,{passive:true});
+
+  // Typed answer input (simple buffer)
+  let typed = "";
+  addEventListener("keydown",(e)=>{
+    if (game.state!=="play" && game.state!=="title" && game.state!=="over" && game.state!=="pause") return;
+    const k = e.key;
+    if (/^[0-9]$/.test(k)) typed += k;
+    if (k === "Backspace") typed = typed.slice(0,-1);
+    if (k === "Enter") submitTyped();
+    if (k.toLowerCase() === "p") togglePause();
+    if (k.toLowerCase() === "r") reset(true);
+    if (k === "1") pickChoice(0);
+    if (k === "2") pickChoice(1);
+    if (k === "3") pickChoice(2);
+  });
+
+  function togglePause(){
+    if (game.state==="play") game.state="pause";
+    else if (game.state==="pause") game.state="play";
+    beep(660,0.02,"triangle",0.12);
+  }
+
+  // Game state
+  const game = {
+    state: "title", // title, play, pause, over
+    time: 0,
+    score: 0,
+    streak: 0,
+    hearts: 3,
+    level: 1,
+    mode: "addsub", // addsub, mul, mix
+    nextT: 0,
+    shake: 0,
+    msg: "",
+    msgT: 0
+  };
+
+  const meteors = [];
+  const particles = [];
+
+  function reset(toPlay){
+    game.state = toPlay ? "play" : "title";
+    game.time = 0;
+    game.score = 0;
+    game.streak = 0;
+    game.hearts = 3;
+    game.level = 1;
+    game.mode = "addsub";
+    game.nextT = 0;
+    game.shake = 0;
+    game.msg = "";
+    game.msgT = 0;
+    typed = "";
+    meteors.length = 0;
+    particles.length = 0;
+    spawnMeteor(); // start with one
+    updatePills();
+  }
+
+  function updatePills(){
+    const modeText = game.mode==="addsub" ? "+ / −" : (game.mode==="mul" ? "×" : "Mix");
+    leftPill.textContent = `Level ${game.level} • ${modeText} • ♥ ${game.hearts} • Streak ${game.streak}`;
+    rightPill.textContent = `Score ${game.score} • Best ${best}`;
+  }
+
+  function setMessage(text, t=1.2){
+    game.msg = text;
+    game.msgT = t;
+  }
+
+  function difficultyFromLevel(L){
+    // Simple kid-friendly ramp:
+    // L1-2: +/− within 10
+    // L3-4: +/− within 20
+    // L5-6: +/− within 50
+    // L7+: small multiplication + mix
+    if (L <= 2) return { max: 10, allowMul:false, mulMax: 3, ops:["+", "-"] };
+    if (L <= 4) return { max: 20, allowMul:false, mulMax: 4, ops:["+", "-"] };
+    if (L <= 6) return { max: 50, allowMul:false, mulMax: 6, ops:["+", "-"] };
+    if (L <= 8) return { max: 60, allowMul:true,  mulMax: 6, ops:["+", "-", "×"] };
+    return          { max: 99, allowMul:true,  mulMax: 9, ops:["+", "-", "×"] };
+  }
+
+  function makeProblem(){
+    const d = difficultyFromLevel(game.level);
+
+    // Choose operation
+    let op;
+    if (game.mode==="addsub") op = d.ops[rndi(d.ops.length)];
+    else if (game.mode==="mul") op = "×";
+    else op = d.ops[rndi(d.ops.length)];
+
+    let a=0,b=0, ans=0, text="";
+    if (op === "×") {
+      a = rndi(d.mulMax+1, 2);
+      b = rndi(d.mulMax+1, 2);
+      ans = a*b;
+      text = `${a} × ${b}`;
+    } else if (op === "+") {
+      a = rndi(d.max+1, 0);
+      b = rndi(d.max+1, 0);
+      ans = a+b;
+      text = `${a} + ${b}`;
+    } else { // minus: keep non-negative
+      a = rndi(d.max+1, 0);
+      b = rndi(Math.min(a, d.max)+1, 0);
+      ans = a-b;
+      text = `${a} − ${b}`;
+    }
+    return { a,b,op,ans,text };
+  }
+
+  function spawnMeteor(){
+    const p = makeProblem();
+    const x = rnd(W*0.78, W*0.22);
+    const y = -40;
+    const speed = 35 + game.level*7 + rnd(8,-8);
+    const r = 28;
+
+    // create 3 choices (1 correct + 2 plausible)
+    const correct = p.ans;
+    const choices = new Set([correct]);
+    while (choices.size < 3){
+      const delta = rndi(9,1) * (Math.random()<0.5 ? -1 : 1);
+      const cand = clamp(correct + delta, 0, 999);
+      choices.add(cand);
+    }
+    const arr = [...choices];
+    // shuffle
+    for (let i=arr.length-1;i>0;i--){ const j = (Math.random()*(i+1))|0; [arr[i],arr[j]]=[arr[j],arr[i]]; }
+
+    meteors.push({
+      x,y, r,
+      vy: speed,
+      prob: p,
+      choices: arr,
+      correctIndex: arr.indexOf(correct),
+      chosen: null,
+      hit: false,
+      t: 0
+    });
+  }
+
+  function spark(x,y, n=16, col="rgba(120,220,255,.85)", sp=260, life=0.6){
+    for (let i=0;i<n;i++){
+      const a = rnd(TAU);
+      const s = rnd(sp*1.2, sp*0.2);
+      particles.push({x,y, vx:Math.cos(a)*s, vy:Math.sin(a)*s, r:rnd(3,1), life:life*rnd(1.2,0.7), col});
+    }
+  }
+
+  function handleTap(x,y){
+    if (game.state==="title") { reset(true); beep(720,0.06,"triangle",0.16); return; }
+    if (game.state==="over")  { reset(true); beep(720,0.06,"triangle",0.16); return; }
+    if (game.state==="pause") { togglePause(); return; }
+    if (game.state!=="play") return;
+
+    // Tap on any answer bubble
+    const m = meteors[0];
+    if (!m) return;
+    const bubbles = getBubbleRects(m);
+    for (let i=0;i<bubbles.length;i++){
+      const b = bubbles[i];
+      const dx = x - b.cx, dy = y - b.cy;
+      if (dx*dx + dy*dy < b.r*b.r){
+        checkAnswer(i);
+        return;
+      }
+    }
+  }
+
+  function pickChoice(i){
+    if (game.state==="title") { reset(true); return; }
+    if (game.state==="over")  { reset(true); return; }
+    if (game.state!=="play") return;
+    checkAnswer(i);
+  }
+
+  function submitTyped(){
+    if (game.state==="title") { reset(true); return; }
+    if (game.state==="over")  { reset(true); return; }
+    if (game.state!=="play") return;
+    const m = meteors[0];
+    if (!m) return;
+    const v = typed.length ? +typed : NaN;
+    typed = "";
+    if (!Number.isFinite(v)) return;
+    const idx = m.choices.indexOf(v);
+    if (idx >= 0) checkAnswer(idx);
+    else {
+      // typed something not in choices: treat as wrong (but gentle)
+      wrong(m, `Oops! Try one of the bubbles.`);
+    }
+  }
+
+  function checkAnswer(index){
+    const m = meteors[0];
+    if (!m || m.hit) return;
+
+    if (index === m.correctIndex) {
+      correct(m);
+    } else {
+      wrong(m, "Not quite — try again!");
+    }
+  }
+
+  function correct(m){
+    m.hit = true;
+    game.streak += 1;
+    game.score += 10 + Math.min(20, game.streak);
+    game.shake = Math.min(14, game.shake + 6);
+    beep(880, 0.05, "triangle", 0.18);
+    spark(m.x, m.y, 22, "rgba(180,255,220,.85)", 340, 0.7);
+    setMessage(["Great!", "Nice!", "You got it!", "Correct!"][rndi(4)], 0.9);
+
+    // level up every 6 correct answers
+    if (game.streak % 6 === 0) {
+      game.level += 1;
+      if (game.level === 7) game.mode = "mix";
+      if (game.level === 9) game.mode = "mul";
+      beep(990, 0.07, "sine", 0.16);
+      setMessage(`Level up! Now level ${game.level}`, 1.1);
+    }
+
+    // clear and spawn next quickly
+    meteors.shift();
+    game.nextT = 0.35;
+    typed = "";
+
+    // update best
+    if (game.score > best) {
+      best = game.score;
+      localStorage.setItem(BEST_KEY, String(best)); // setItem(key, value) updates storage [web:22]
+    }
+    updatePills();
+  }
+
+  function wrong(m, msg){
+    game.streak = 0;
+    game.hearts -= 1;
+    game.shake = Math.min(18, game.shake + 8);
+    beep(220, 0.08, "sawtooth", 0.12);
+    spark(m.x, m.y, 18, "rgba(255,140,190,.8)", 320, 0.75);
+    setMessage(msg, 1.0);
+    typed = "";
+    updatePills();
+
+    if (game.hearts <= 0) {
+      game.hearts = 0;
+      game.state = "over";
+      setMessage("Game over — tap to try again!", 999);
+      beep(140, 0.12, "square", 0.12);
+    }
+  }
+
+  function missed(){
+    // meteor hit the ground
+    game.streak = 0;
+    game.hearts -= 1;
+    game.shake = Math.min(18, game.shake + 10);
+    beep(180, 0.10, "square", 0.12);
+    spark(W*0.5, H-28, 28, "rgba(255,220,120,.8)", 420, 0.9);
+    setMessage("Oh no — it landed! Answer faster.", 1.1);
+    updatePills();
+    if (game.hearts <= 0) {
+      game.hearts = 0;
+      game.state = "over";
+      setMessage("Game over — tap to try again!", 999);
+    }
+  }
+
+  function update(dt){
+    game.time += dt;
+    game.msgT -= dt;
+    if (game.msgT < 0) game.msgT = 0;
+
+    // Pause & restart hotkeys
+    if (keys.has("p")) { keys.delete("p"); togglePause(); }
+    if (keys.has("r")) { keys.delete("r"); reset(true); }
+
+    if (game.state==="title") {
+      // soft background particles
+      if (particles.length < 70 && Math.random() < 0.25) particles.push({x:rnd(W),y:rnd(H),vx:rnd(40,-40),vy:rnd(40,-40),r:rnd(3,1),life:rnd(1.4,0.7),col:"rgba(120,220,255,.55)"});
+      stepParticles(dt);
+      return;
+    }
+    if (game.state==="pause" || game.state==="over") {
+      stepParticles(dt*0.5);
+      game.shake *= Math.pow(0.01, dt);
+      return;
+    }
+    if (game.state!=="play") return;
+
+    // spawn next meteor after delay
+    game.nextT -= dt;
+    if (game.nextT <= 0 && meteors.length < 1) spawnMeteor();
+
+    const m = meteors[0];
+    if (m) {
+      m.t += dt;
+      m.y += m.vy * dt;
+
+      // speed up slightly with time
+      m.vy += (3 + game.level*0.35) * dt;
+
+      if (m.y > H - 70) {
+        meteors.shift();
+        missed();
+        game.nextT = 0.35;
+      }
+    }
+
+    stepParticles(dt);
+    game.shake *= Math.pow(0.02, dt);
+    updatePills();
+  }
+
+  function stepParticles(dt){
+    for (let i=particles.length-1;i>=0;i--){
+      const p = particles[i];
+      p.life -= dt;
+      p.x += p.vx*dt; p.y += p.vy*dt;
+      p.vx *= Math.pow(0.02, dt); p.vy *= Math.pow(0.02, dt);
+      p.r *= Math.pow(0.25, dt);
+      if (p.life <= 0 || p.r < 0.4) particles.splice(i,1);
+    }
+  }
+
+  function draw(){
+    ctx.fillStyle = "#070915";
+    ctx.fillRect(0,0,W,H);
+
+    // shake
+    const sx = (Math.random()*2-1) * game.shake;
+    const sy = (Math.random()*2-1) * game.shake;
+    ctx.save();
+    ctx.translate(sx, sy);
+
+    // background grid
+    ctx.globalAlpha = 0.35;
+    ctx.strokeStyle = "rgba(120,220,255,.22)";
+    ctx.lineWidth = 1;
+    const grid = 60;
+    ctx.beginPath();
+    for (let x=((game.time*20)%grid); x<W; x+=grid){ ctx.moveTo(x,0); ctx.lineTo(x,H); }
+    for (let y=((game.time*16)%grid); y<H; y+=grid){ ctx.moveTo(0,y); ctx.lineTo(W,y); }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // particles (additive)
+    ctx.globalCompositeOperation="lighter";
+    for (const p of particles){
+      ctx.fillStyle=p.col;
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,TAU); ctx.fill();
+    }
+    ctx.globalCompositeOperation="source-over";
+
+    // ground
+    const groundY = H-48;
+    ctx.fillStyle="rgba(0,0,0,.25)";
+    ctx.fillRect(0, groundY, W, 48);
+    ctx.strokeStyle="rgba(255,220,120,.35)";
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    ctx.moveTo(0, groundY);
+    ctx.lineTo(W, groundY);
+    ctx.stroke();
+
+    // meteor
+    const m = meteors[0];
+    if (m){
+      drawMeteor(m);
+    }
+
+    // top text overlay
+    if (game.state==="title") {
+      overlay("Math Meteors", "Tap to start • Ages 7–10");
+    } else if (game.state==="pause") {
+      overlay("Paused", "Press P or tap to continue");
+    } else if (game.state==="over") {
+      overlay("Game Over", "Tap to play again");
+    }
+
+    // typed input display
+    if (game.state==="play"){
+      ctx.textAlign="center";
+      ctx.font="16px ui-sans-serif, system-ui";
+      ctx.fillStyle="rgba(220,240,255,.85)";
+      const t = typed.length ? typed : "Type answer…";
+      ctx.fillText(t, W*0.5, 26);
+    }
+
+    // message
+    if (game.msgT > 0 && game.msg){
+      ctx.textAlign="center";
+      ctx.font="700 22px ui-sans-serif, system-ui";
+      ctx.fillStyle="rgba(255,255,255,.92)";
+      ctx.fillText(game.msg, W*0.5, 72);
+    }
+
+    ctx.restore();
+  }
+
+  function overlay(title, sub){
+    ctx.save();
+    ctx.fillStyle="rgba(0,0,0,.55)";
+    ctx.fillRect(0,0,W,H);
+    ctx.textAlign="center";
+    ctx.fillStyle="rgba(255,255,255,.95)";
+    ctx.font="800 56px ui-sans-serif, system-ui";
+    ctx.fillText(title, W*0.5, H*0.46);
+    ctx.font="16px ui-sans-serif, system-ui";
+    ctx.fillStyle="rgba(210,230,255,.88)";
+    ctx.fillText(sub, W*0.5, H*0.52);
+    ctx.restore();
+  }
+
+  function glowCircle(x,y,r,col,blur=18){
+    ctx.save();
+    ctx.shadowColor=col; ctx.shadowBlur=blur;
+    ctx.fillStyle="rgba(0,0,0,0)";
+    ctx.beginPath(); ctx.arc(x,y,r,0,TAU); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawMeteor(m){
+    // body
+    const col = "rgba(255,220,120,.92)";
+    glowCircle(m.x, m.y, m.r*1.2, col, 26);
+    ctx.fillStyle="rgba(255,255,255,.10)";
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.r*0.55, 0, TAU); ctx.fill();
+
+    ctx.strokeStyle=col;
+    ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, TAU); ctx.stroke();
+
+    // problem text centered (measureText returns width for centering if needed) [web:16]
+    ctx.textAlign="center";
+    ctx.font="700 22px ui-sans-serif, system-ui";
+    ctx.fillStyle="rgba(255,255,255,.92)";
+    ctx.fillText(m.prob.text, m.x, m.y+7);
+
+    // answer bubbles
+    const bubbles = getBubbleRects(m);
+    for (let i=0;i<bubbles.length;i++){
+      const b = bubbles[i];
+      const base = "rgba(120,220,255,.90)";
+      glowCircle(b.cx, b.cy, b.r*1.2, base, 18);
+      ctx.strokeStyle=base;
+      ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(b.cx,b.cy,b.r,0,TAU); ctx.stroke();
+
+      ctx.font="700 20px ui-sans-serif, system-ui";
+      ctx.fillStyle="rgba(255,255,255,.95)";
+      ctx.textAlign="center";
+      ctx.fillText(String(m.choices[i]), b.cx, b.cy+7);
+    }
+  }
+
+  function getBubbleRects(m){
+    const y = clamp(m.y + 78, 150, H-120);
+    const spread = Math.min(320, W*0.46);
+    const r = 28;
+    return [
+      {cx: W*0.5 - spread*0.5, cy: y, r},
+      {cx: W*0.5,             cy: y, r},
+      {cx: W*0.5 + spread*0.5, cy: y, r},
+    ];
+  }
+
+  // Main loop
+  let last = performance.now();
+  function frame(now){
+    const dt = Math.min(0.033, (now-last)/1000);
+    last = now;
+
+    if (game.state !== "pause") update(dt);
+    draw();
+
+    requestAnimationFrame(frame);
+  }
+
+  // Start
+  rightPill.textContent = `Best ${best}`;
+  reset(false);
+  requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>
