@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cosmic Terraformer: Gargantua V2</title>
+    <style>
+        :root {
+            --c-dust: #ffd700;
+            --c-sec: #00ff66;
+            --c-cur: #00f3ff;
+            --bg: #030308;
+            --panel: rgba(10, 10, 20, 0.9);
+        }
+        * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: var(--bg); color: white; font-family: 'Segoe UI', sans-serif; overflow: hidden; touch-action: none; }
+        
+        #gameCanvas { position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* UI Panel Rechts */
+        #ui {
+            position: absolute; right: 20px; top: 20px; bottom: 20px; width: 380px;
+            background: var(--panel); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 15px; padding: 15px; z-index: 10; display: flex; flex-direction: column;
+            backdrop-filter: blur(10px); box-shadow: -5px 0 25px rgba(0,0,0,0.8);
+            transition: box-shadow 0.5s, border-color 0.5s;
+        }
+
+        h1 { margin: 0 0 5px 0; font-size: 20px; text-align: center; color: #fff; text-transform: uppercase; letter-spacing: 2px; }
+        .subtitle { text-align: center; font-size: 10px; color: #888; margin-bottom: 15px; text-transform: uppercase;}
+        
+        /* Scores */
+        .score-board { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-bottom: 10px; text-align: center; }
+        .box { background: rgba(0,0,0,0.6); padding: 10px 5px; border-radius: 8px; font-size: 12px; }
+        .val { font-size: 18px; font-weight: bold; margin-top: 5px; }
+        .dust-color { color: var(--c-dust); }
+        .sec-color { color: var(--c-sec); }
+        .cur-color { color: var(--c-cur); }
+
+        /* Status & Artefakte */
+        .meta-board { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 15px; background: rgba(0,0,0,0.4); padding: 8px; border-radius: 8px;}
+        .meta-item { color: #aaa; }
+        .meta-item span { font-weight: bold; color: #fff;}
+
+        /* Slider */
+        .slider-container { margin-bottom: 15px; background: rgba(0,0,0,0.4); padding: 10px; border-radius: 8px; }
+        .slider-labels { display: flex; justify-content: space-between; font-size: 11px; color: #aaa; margin-bottom: 5px;}
+        input[type=range] { width: 100%; accent-color: var(--c-sec); }
+
+        /* Event Banner */
+        #event-banner {
+            display: none; padding: 10px; text-align: center; font-weight: bold;
+            border-radius: 8px; margin-bottom: 15px; animation: pulse 1s infinite alternate;
+        }
+        @keyframes pulse { from { opacity: 0.8; } to { opacity: 1; transform: scale(1.02); } }
+
+        /* Faction Picker */
+        #faction-picker { display: none; background: rgba(0,243,255,0.1); border: 1px solid var(--c-cur); padding: 10px; border-radius: 8px; margin-bottom: 15px; text-align: center;}
+        .faction-btns { display: flex; gap: 5px; margin-top: 10px; }
+        .f-btn { flex: 1; padding: 5px; background: #222; border: 1px solid #555; color: white; cursor: pointer; border-radius: 5px; font-size: 10px;}
+        .f-btn:hover { background: #444; }
+
+        /* Upgrades */
+        #upgrades { overflow-y: auto; flex-grow: 1; padding-right: 5px; display: flex; flex-direction: column; gap: 8px; }
+        #upgrades::-webkit-scrollbar { display: none; }
+        
+        .btn {
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: white;
+            padding: 12px; border-radius: 8px; text-align: left; cursor: pointer; transition: 0.2s;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .btn:active { transform: scale(0.97); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn.buyable { border-color: var(--c-dust); background: rgba(255, 215, 0, 0.1); }
+        .btn.epic { border-color: #ff0055; background: rgba(255, 0, 85, 0.2); text-align: center; justify-content: center; font-weight: bold; font-size: 16px; text-transform: uppercase; animation: epicPulse 2s infinite; }
+        
+        @keyframes epicPulse { 0% { box-shadow: 0 0 5px #ff0055; } 50% { box-shadow: 0 0 20px #ff0055; } 100% { box-shadow: 0 0 5px #ff0055; } }
+
+        .btn-info { display: flex; flex-direction: column; }
+        .btn-title { font-weight: bold; font-size: 14px; }
+        .btn-desc { font-size: 11px; color: #aaa; margin-top: 3px; }
+        .btn-cost { font-size: 13px; font-weight: bold; color: var(--c-dust); text-align: right;}
+        
+        .bottom-controls { display: flex; justify-content: space-between; margin-top: 10px; align-items: center; }
+        .small-btn { background: transparent; border: 1px solid #555; color: #888; padding: 5px 10px; border-radius: 5px; font-size: 10px; cursor: pointer; }
+        .supercharge { border-color: #ff0055; color: #ff0055; animation: pulse 2s infinite alternate;}
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui">
+        <h1>Gargantua</h1>
+        <div class="subtitle" id="universe-name">Universum Alpha</div>
+        
+        <div class="score-board">
+            <div class="box"><span class="dust-color">STAUB</span><div class="val dust-color" id="val-dust">0</div><div id="sps-dust" style="font-size:10px; color:#aaa;">+0/s</div></div>
+            <div class="box"><span class="sec-color">SCHUTZ</span><div class="val sec-color" id="val-sec">0</div><div id="sps-sec" style="font-size:10px; color:#aaa;">+0/s</div></div>
+            <div class="box"><span class="cur-color">NEUGIER</span><div class="val cur-color" id="val-cur">0</div><div id="sps-cur" style="font-size:10px; color:#aaa;">+0/s</div></div>
+        </div>
+
+        <div class="meta-board">
+            <div class="meta-item">Fraktion: <span id="f-display">Keine</span></div>
+            <div class="meta-item">Artefakte: <span id="a-display">0/3</span></div>
+        </div>
+
+        <div class="slider-container">
+            <div class="slider-labels">
+                <span style="color:var(--c-sec)">Max Sicherheit</span>
+                <span style="color:white">Fokus</span>
+                <span style="color:var(--c-dust)">Max Produktion</span>
+            </div>
+            <input type="range" id="focusSlider" min="0" max="100" value="50" oninput="updateStats()">
+        </div>
+
+        <div id="event-banner">Event!</div>
+
+        <div id="faction-picker">
+            <div style="font-size:12px; font-weight:bold;">🛸 Alien-Diplomatie verfügbar!</div>
+            <div style="font-size:10px; color:#aaa;">Wähle deinen galaktischen Pfad:</div>
+            <div class="faction-btns">
+                <button class="f-btn" onclick="setFaction('trade')" style="color:var(--c-dust)">Handel</button>
+                <button class="f-btn" onclick="setFaction('science')" style="color:var(--c-cur)">Forschung</button>
+                <button class="f-btn" onclick="setFaction('military')" style="color:var(--c-sec)">Militär</button>
+            </div>
+        </div>
+
+        <div id="upgrades"></div>
+        
+        <div class="bottom-controls">
+            <button class="small-btn supercharge" id="btn-supercharge" onclick="triggerSupercharge()">Supercharger Boost</button>
+            <button class="small-btn" onclick="hardReset()">Reset</button>
+        </div>
+    </div>
+
+    <script>
+        // --- GAME DATA & CONFIG ---
+        const items = [
+            { id: 'click', name: 'Gravitationslinse', desc: 'Klick-Power +1', cost: 15, baseCost: 15, costMult: 1.5, type: 'click' },
+            { id: 'merkur', name: 'Merkur', desc: '+2 Staub/s', cost: 50, baseCost: 50, costMult: 1.2, type: 'planet', pType: 'rock', color: '#a8a8a8', radius: 8, orbit: 80 },
+            { id: 'sat', name: 'Verteidigungs-Sat', desc: '+1 Schutz/s', cost: 150, baseCost: 150, costMult: 1.3, type: 'def' },
+            { id: 'venus', name: 'Venus', desc: '+10 Staub/s', cost: 400, baseCost: 400, costMult: 1.3, type: 'planet', pType: 'rock', color: '#e3bb76', radius: 10, orbit: 120 },
+            { id: 'probe', name: 'Forschungssonde', desc: '+1 Neugier/s', cost: 1000, baseCost: 1000, costMult: 1.4, type: 'cur' },
+            { id: 'erde', name: 'Erde (mit Mond)', desc: '+30 Staub, +5 Neugier', cost: 2500, baseCost: 2500, costMult: 1.4, type: 'planet', pType: 'earth', color: '#2b82c9', radius: 12, orbit: 160 },
+            { id: 'mars', name: 'Mars', desc: '+80 Staub/s', cost: 8000, baseCost: 8000, costMult: 1.4, type: 'planet', pType: 'rock', color: '#c1440e', radius: 11, orbit: 200 },
+            { id: 'ships', name: 'Raumhafen (Schiffe)', desc: 'Evolutionäre Schiffe (+20% Staub pro Stufe)', cost: 20000, baseCost: 20000, costMult: 2.5, type: 'tech' },
+            { id: 'jupiter', name: 'Jupiter', desc: '+250 Staub, +20 Schutz', cost: 50000, baseCost: 50000, costMult: 1.5, type: 'planet', pType: 'gas', color: '#c88b3a', radius: 24, orbit: 260 },
+            { id: 'saturn', name: 'Saturn (mit Ringen)', desc: '+800 Staub/s', cost: 150000, baseCost: 150000, costMult: 1.5, type: 'planet', pType: 'ring', color: '#eaddb4', radius: 20, orbit: 330 },
+            { id: 'gargantua', name: 'SINGULARITÄT ZÜNDEN', desc: 'Starte ein neues Multiversum (Prestige)', cost: 10000000, baseCost: 10000000, costMult: 1, type: 'epic' }
+        ];
+
+        const genes = [
+            { id: 'gold', name: 'Goldenes Zeitalter', desc: 'Staub x2' },
+            { id: 'curious', name: 'Wissensdurst', desc: 'Neugier x2' },
+            { id: 'shield', name: 'Eiserner Vorhang', desc: 'Schutz x3' }
+        ];
+
+        let state = {
+            dust: 0, sec: 0, cur: 0,
+            counts: {}, prestige: 0,
+            slider: 50,
+            faction: null, artifacts: 0, gene: null,
+            lastSave: Date.now()
+        };
+
+        let rates = { dust: 0, sec: 0, cur: 0, click: 1 };
+        let planets = []; let ships = []; let particles = []; let otherPlayers = [];
+        
+        let activeEvent = null; 
+        let isBlackHole = false; let blackHoleProgress = 0;
+        let isSupercharged = false;
+
+        // --- INIT & LOAD ---
+        function init() {
+            items.forEach(i => state.counts[i.id] = 0);
+            const saved = localStorage.getItem('gargantua_save');
+            if (saved) {
+                try { state = { ...state, ...JSON.parse(saved) }; } catch(e){}
+            }
+            document.getElementById('focusSlider').value = state.slider;
+            
+            // Setup Multiversum Name
+            let uName = "Universum Alpha";
+            if(state.prestige > 0) uName = `Multiversum ${state.prestige} (${state.gene ? state.gene.name : 'Pur'})`;
+            document.getElementById('universe-name').innerText = uName;
+
+            buildUpgradesUI(); updateStats(); rebuildPlanets();
+            
+            // Fake Multiplayer Leaderboard blips
+            for(let i=0; i<10; i++) otherPlayers.push({x: Math.random(), y: Math.random(), a: Math.random()*Math.PI*2});
+        }
+
+        function hardReset() {
+            if(confirm("Wirklich das gesamte Raum-Zeit-Kontinuum löschen?")) {
+                localStorage.removeItem('gargantua_save'); location.reload();
+            }
+        }
+
+        // --- LOGIC ---
+        function updateStats() {
+            let s = state.counts;
+            state.slider = parseInt(document.getElementById('focusSlider').value);
+            
+            let bDust = (s.merkur*2) + (s.venus*10) + (s.erde*30) + (s.mars*80) + (s.jupiter*250) + (s.saturn*800);
+            let bSec = (s.sat*1) + (s.jupiter*20);
+            let bCur = (s.probe*1) + (s.erde*5);
+            
+            rates.click = 1 + s.click;
+            
+            // Synergy (Mars + Earth = +20% Cur)
+            if(s.erde > 0 && s.mars > 0) bCur *= 1.2;
+            
+            let dustMult = (state.slider / 50); 
+            let secMult = ((100 - state.slider) / 50); 
+            
+            // Ship Evolution Mult
+            if (s.ships > 0) dustMult *= (1 + (s.ships * 0.2));
+
+            // Factions
+            if (state.faction === 'trade') dustMult *= 1.5;
+            if (state.faction === 'science') bCur *= 1.5;
+            if (state.faction === 'military') secMult *= 2;
+
+            // Multiversum Genes
+            if (state.gene) {
+                if(state.gene.id === 'gold') dustMult *= 2;
+                if(state.gene.id === 'curious') bCur *= 2;
+                if(state.gene.id === 'shield') secMult *= 3;
+            }
+
+            // Artifacts
+            dustMult *= (1 + (state.artifacts * 0.1));
+
+            // Supercharger
+            if(isSupercharged) { dustMult *= 5; rates.click *= 5; }
+            // Storm Event
+            if(activeEvent && activeEvent.type === 'storm') { dustMult = 0; rates.click *= 10; }
+
+            rates.dust = bDust * dustMult;
+            rates.sec = bSec * secMult;
+            rates.cur = bCur;
+
+            document.getElementById('sps-dust').innerText = `+${Math.floor(rates.dust)}/s`;
+            document.getElementById('sps-sec').innerText = `+${Math.floor(rates.sec)}/s`;
+            document.getElementById('sps-cur').innerText = `+${Math.floor(rates.cur)}/s`;
+
+            // UI Updates
+            document.getElementById('f-display').innerText = state.faction ? state.faction.toUpperCase() : 'Keine';
+            document.getElementById('a-display').innerText = `${state.artifacts}/3`;
+            document.getElementById('f-display').style.color = state.faction === 'trade' ? varColor('--c-dust') : state.faction === 'science' ? varColor('--c-cur') : state.faction === 'military' ? varColor('--c-sec') : '#aaa';
+            
+            // Faction Picker Display
+            if(state.cur > 500 && !state.faction) document.getElementById('faction-picker').style.display = 'block';
+            else document.getElementById('faction-picker').style.display = 'none';
+
+            // UI Color theme based on faction
+            if(state.faction === 'trade') document.getElementById('ui').style.borderColor = varColor('--c-dust');
+            if(state.faction === 'science') document.getElementById('ui').style.borderColor = varColor('--c-cur');
+        }
+
+        function setFaction(f) { state.faction = f; updateStats(); }
+
+        function triggerSupercharge() {
+            if(isSupercharged) return;
+            isSupercharged = true;
+            document.getElementById('btn-supercharge').innerText = "⚡ ÜBERLADEN ⚡";
+            updateStats();
+            setTimeout(() => {
+                isSupercharged = false;
+                document.getElementById('btn-supercharge').innerText = "Supercharger Boost";
+                updateStats();
+            }, 10000); // 10 Sec boost
+        }
+
+        function getCost(id) {
+            let item = items.find(i => i.id === id);
+            return Math.floor(item.baseCost * Math.pow(item.costMult, state.counts[id] || 0));
+        }
+
+        function buy(id) {
+            let cost = getCost(id);
+            if (state.dust >= cost) {
+                state.dust -= cost; state.counts[id]++;
+                if(id === 'gargantua') triggerBlackHole();
+                else { updateStats(); buildUpgradesUI(); rebuildPlanets(); }
+            }
+        }
+
+        function triggerBlackHole() {
+            isBlackHole = true;
+            document.getElementById('ui').style.opacity = '0.1';
+            
+            // Select random gene for next run
+            let newGene = genes[Math.floor(Math.random() * genes.length)];
+            
+            setTimeout(() => {
+                state.prestige++;
+                let p = state.prestige; let a = state.artifacts;
+                state.dust = 0; state.sec = 0; state.cur = 0;
+                items.forEach(i => state.counts[i.id] = 0);
+                state.prestige = p; state.artifacts = a; // Keep prestige & artifacts
+                state.faction = null;
+                state.gene = newGene;
+                localStorage.setItem('gargantua_save', JSON.stringify(state));
+                location.reload(); 
+            }, 8000); 
+        }
+
+        // --- UI ---
+        const upgradesDiv = document.getElementById('upgrades');
+        function buildUpgradesUI() {
+            upgradesDiv.innerHTML = '';
+            items.forEach(item => {
+                if(item.id === 'gargantua' && state.dust < 1000000 && state.cur < 500) return;
+                // Allow multiple ships, 1 of planets
+                if((item.type === 'planet' || item.type === 'epic') && state.counts[item.id] >= 1) return;
+
+                let cost = getCost(item.id);
+                let btn = document.createElement('div');
+                btn.className = `btn ${state.dust >= cost ? 'buyable' : ''} ${item.type === 'epic' ? 'epic' : ''}`;
+                btn.onclick = () => { if(state.dust >= cost) buy(item.id); };
+                
+                if (item.type === 'epic') {
+                    btn.innerHTML = `${item.name}<br><span style="font-size:12px; font-weight:normal;">Kosten: ${formatNum(cost)} Staub</span>`;
+                } else {
+                    btn.innerHTML = `
+                        <div class="btn-info">
+                            <span class="btn-title">${item.name} <span style="font-weight:normal; color:#888;">(${state.counts[item.id]})</span></span>
+                            <span class="btn-desc">${item.desc}</span>
+                        </div>
+                        <div class="btn-cost">${formatNum(cost)}</div>
+                    `;
+                }
+                upgradesDiv.appendChild(btn);
+            });
+        }
+
+        function updateUI() {
+            document.getElementById('val-dust').innerText = formatNum(Math.floor(state.dust));
+            document.getElementById('val-sec').innerText = formatNum(Math.floor(state.sec));
+            document.getElementById('val-cur').innerText = formatNum(Math.floor(state.cur));
+
+            Array.from(upgradesDiv.children).forEach((child, idx) => {
+                let btnInfo = child.querySelector('.btn-title');
+                if(!btnInfo) return;
+                let title = btnInfo.innerText.split(' (')[0];
+                let item = items.find(i => i.name === title);
+                if(item) {
+                    let cost = getCost(item.id);
+                    if(state.dust >= cost) child.classList.add('buyable');
+                    else child.classList.remove('buyable');
+                    child.querySelector('.btn-cost').innerText = formatNum(cost);
+                }
+            });
+        }
+
+        function formatNum(n) {
+            if(n >= 1000000) return (n/1000000).toFixed(2) + 'M';
+            if(n >= 1000) return (n/1000).toFixed(1) + 'k';
+            return n;
+        }
+
+        // --- GAME LOOP ---
+        setInterval(() => {
+            if(isBlackHole) return;
+
+            let dt = 0.1;
+            state.dust += rates.dust * dt;
+            state.sec += rates.sec * dt;
+            state.cur += rates.cur * dt;
+            
+            if(Math.random() < 0.01 && !activeEvent) spawnEvent();
+
+            if(activeEvent) {
+                activeEvent.time -= dt;
+                handleEventTick(dt);
+                if(activeEvent.time <= 0) endEvent();
+            }
+
+            updateUI();
+            if(Date.now() - state.lastSave > 3000) {
+                state.lastSave = Date.now();
+                localStorage.setItem('gargantua_save', JSON.stringify(state));
+            }
+        }, 100);
+
+        function spawnEvent() {
+            let r = Math.random();
+            const banner = document.getElementById('event-banner');
+            banner.style.display = 'block';
+
+            if (r < 0.3 && state.dust > 100) {
+                activeEvent = { type: 'worm', time: 5, maxTime: 5 };
+                banner.style.background = 'rgba(255,0,0,0.5)';
+                banner.innerText = "⚠️ SPACE WORM ANGRIFF! (Klick ihn!)";
+            } else if (r < 0.6 && state.cur > 10) {
+                activeEvent = { type: 'alien', time: 4, maxTime: 4 };
+                banner.style.background = 'rgba(0,243,255,0.5)';
+                banner.innerText = "🛸 FREMDES SCHIFF GESPICHTET!";
+            } else if (r < 0.8) {
+                activeEvent = { type: 'storm', time: 8, maxTime: 8 };
+                banner.style.background = 'rgba(200,0,255,0.5)';
+                banner.innerText = "⚡ IONENSTURM! (Klick-Power x10)";
+                updateStats();
+            } else {
+                banner.style.display = 'none'; 
+            }
+        }
+
+        function handleEventTick(dt) {
+            if(activeEvent.type === 'worm') {
+                let damage = (state.dust * 0.05 * dt);
+                let mitigation = Math.min(0.95, state.sec / (state.sec + 1000));
+                let actualDamage = damage * (1 - mitigation);
+                state.dust = Math.max(0, state.dust - actualDamage);
+            }
+        }
+
+        function endEvent() {
+            if(activeEvent && activeEvent.type === 'alien') {
+                state.dust += rates.dust * 20 + 500;
+                createParticles(centerX, 100, '#00f3ff', 30);
+            }
+            if(activeEvent && activeEvent.type === 'storm') {
+                activeEvent = null; updateStats(); // Recalculate normal rates
+            }
+            activeEvent = null;
+            document.getElementById('event-banner').style.display = 'none';
+        }
+
+        // --- CANVAS & VISUALS ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        let width, height, centerX, centerY;
+        let bgStars = [];
+
+        function resize() {
+            width = window.innerWidth; height = window.innerHeight;
+            canvas.width = width; canvas.height = height;
+            centerX = width * 0.35; centerY = height / 2;
+            
+            bgStars = [];
+            for(let i=0; i<200; i++) bgStars.push({ x: Math.random()*width, y: Math.random()*height, s: Math.random()*1.5+0.5, a: Math.random() });
+        }
+        window.addEventListener('resize', resize); resize();
+
+        function rebuildPlanets() {
+            planets = []; let i = 0;
+            items.filter(item => item.type === 'planet').forEach(pData => {
+                if(state.counts[pData.id] > 0) {
+                    planets.push({
+                        id: pData.id, color: pData.color, r: pData.radius, orbit: pData.orbit,
+                        angle: Math.random() * Math.PI * 2, speed: 0.005 - (i * 0.0004), type: pData.pType
+                    }); i++;
+                }
+            });
+
+            // Schiffs-Evolution Feature
+            ships = [];
+            let shipLevel = state.counts['ships'] || 0;
+            if(shipLevel > 0 && planets.length >= 2) {
+                let numShips = Math.min(20, planets.length * 2 + shipLevel);
+                for(let s=0; s<numShips; s++) {
+                    ships.push({
+                        p1: Math.floor(Math.random()*planets.length),
+                        p2: Math.floor(Math.random()*planets.length),
+                        progress: Math.random(), speed: 0.002 + (shipLevel*0.0005),
+                        level: shipLevel
+                    });
+                }
+            }
+        }
+
+        canvas.addEventListener('mousedown', handleClick);
+        canvas.addEventListener('touchstart', (e)=>{ e.preventDefault(); handleClick(e); }, {passive: false});
+
+        function handleClick(e) {
+            if(isBlackHole) return;
+            let x = e.clientX || (e.touches && e.touches[0].clientX);
+            let y = e.clientY || (e.touches && e.touches[0].clientY);
+            
+            // Hit Space Worm for Artifacts
+            if(activeEvent && activeEvent.type === 'worm') {
+                let progress = 1 - (activeEvent.time / activeEvent.maxTime);
+                let wx = width * progress;
+                if(Math.abs(x - wx) < 50) {
+                    createParticles(x, y, '#ff0055', 20);
+                    if(state.artifacts < 3 && Math.random() < 0.2) { state.artifacts++; updateStats(); }
+                    endEvent(); return; // Defeated
+                }
+            }
+
+            let dist = Math.hypot(x - centerX, y - centerY);
+            if (dist < 60) {
+                state.dust += rates.click;
+                createParticles(x, y, isSupercharged ? '#ff0055' : (activeEvent && activeEvent.type === 'storm' ? '#c800ff' : '#ffd700'), isSupercharged ? 15 : 5);
+                updateUI();
+            }
+        }
+
+        function createParticles(x, y, color, count) {
+            for(let i=0; i<count; i++) {
+                let a = Math.random() * Math.PI * 2; let v = Math.random() * 5 + 2;
+                particles.push({ x: x, y: y, vx: Math.cos(a)*v, vy: Math.sin(a)*v, life: 1, color: color });
+            }
+        }
+
+        // --- RENDER LOOP ---
+        let renderTime = 0;
+        function draw() {
+            ctx.fillStyle = isBlackHole ? 'rgba(0,0,0,0.5)' : (isSupercharged ? 'rgba(20,0,10,0.4)' : 'rgba(3, 3, 8, 0.4)');
+            ctx.fillRect(0, 0, width, height);
+            renderTime += 0.016;
+
+            // Globals & Background
+            ctx.fillStyle = '#fff';
+            bgStars.forEach(s => {
+                s.a += 0.02; let alpha = (Math.sin(s.a) + 1) / 2;
+                ctx.globalAlpha = isBlackHole ? Math.min(alpha, 1-blackHoleProgress) : alpha;
+                ctx.beginPath(); ctx.arc(s.x, s.y, s.s, 0, Math.PI*2); ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+
+            // Galaktischer Rat (Simulierter Multiplayer im Hintergrund)
+            ctx.fillStyle = 'rgba(255,255,255,0.05)';
+            otherPlayers.forEach(p => {
+                p.a += 0.001;
+                let px = width/2 + Math.cos(p.a) * (width*p.x);
+                let py = height/2 + Math.sin(p.a) * (height*p.y);
+                ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI*2); ctx.fill();
+            });
+
+            if (isBlackHole) {
+                blackHoleProgress += 0.002;
+                if(blackHoleProgress > 1) blackHoleProgress = 1;
+                let diskRadius = 200 * blackHoleProgress + (Math.random()*5);
+                let grad = ctx.createRadialGradient(centerX, centerY, diskRadius*0.2, centerX, centerY, diskRadius*1.5);
+                grad.addColorStop(0, 'black'); grad.addColorStop(0.3, state.gene ? (state.gene.id==='gold'?'#ffd700':'#00f3ff') : 'rgba(255, 100, 0, 0.8)');
+                grad.addColorStop(1, 'transparent');
+                ctx.fillStyle = grad;
+                ctx.beginPath(); ctx.arc(centerX, centerY, diskRadius*1.5, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = 'black';
+                ctx.beginPath(); ctx.arc(centerX, centerY, diskRadius*0.3, 0, Math.PI*2); ctx.fill();
+
+                planets.forEach(p => { p.orbit *= 0.98; p.angle += 0.1; });
+                particles.forEach(p => { 
+                    let angleToCenter = Math.atan2(centerY - p.y, centerX - p.x);
+                    p.x += Math.cos(angleToCenter) * 15; p.y += Math.sin(angleToCenter) * 15;
+                });
+            }
+
+            if(!isBlackHole) {
+                let pulse = Math.sin(renderTime * (isSupercharged?20:5)) * (isSupercharged?10:3);
+                let sRad = 40 + pulse;
+                let starGrad = ctx.createRadialGradient(centerX, centerY, sRad*0.2, centerX, centerY, sRad*3);
+                starGrad.addColorStop(0, '#ffffff');
+                starGrad.addColorStop(0.3, (activeEvent && activeEvent.type==='storm') ? '#c800ff' : (isSupercharged ? '#ff0055' : '#ffcc00'));
+                starGrad.addColorStop(1, 'transparent');
+                
+                ctx.fillStyle = starGrad;
+                ctx.beginPath(); ctx.arc(centerX, centerY, sRad*3, 0, Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#fff';
+                ctx.beginPath(); ctx.arc(centerX, centerY, sRad*0.9, 0, Math.PI*2); ctx.fill();
+
+                // Space Station Modifier (Center Rings)
+                if(state.faction) {
+                    ctx.strokeStyle = state.faction === 'trade' ? varColor('--c-dust') : state.faction === 'science' ? varColor('--c-cur') : varColor('--c-sec');
+                    ctx.lineWidth = 2;
+                    ctx.beginPath(); ctx.arc(centerX, centerY, 55, renderTime, renderTime + Math.PI); ctx.stroke();
+                    ctx.beginPath(); ctx.arc(centerX, centerY, 60, -renderTime, -renderTime + Math.PI); ctx.stroke();
+                }
+            }
+
+            let sats = state.counts['sat'] || 0;
+            ctx.fillStyle = varColor('--c-sec', '#00ff66');
+            for(let i=0; i<Math.min(sats, 30); i++) {
+                let a = renderTime + (i * (Math.PI*2 / Math.min(sats,30)));
+                let r = isBlackHole ? 40 * (1-blackHoleProgress) : 65 + Math.sin(renderTime*2+i)*5;
+                let sx = centerX + Math.cos(a) * r; let sy = centerY + Math.sin(a) * r;
+                ctx.beginPath(); ctx.arc(sx, sy, 2, 0, Math.PI*2); ctx.fill();
+            }
+
+            planets.forEach(p => {
+                if(!isBlackHole) {
+                    ctx.strokeStyle = state.gene && state.gene.id === 'reverse_orbit' ? 'rgba(0,255,100,0.05)' : 'rgba(255,255,255,0.05)';
+                    ctx.beginPath(); ctx.arc(centerX, centerY, p.orbit, 0, Math.PI*2); ctx.stroke();
+                    p.angle += p.speed * (state.gene && state.gene.id === 'reverse_orbit' ? -1 : 1);
+                }
+                
+                let px = centerX + Math.cos(p.angle) * p.orbit;
+                let py = centerY + Math.sin(p.angle) * p.orbit;
+
+                if(p.type === 'ring') {
+                    ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 3;
+                    ctx.beginPath(); ctx.ellipse(px, py, p.r*2, p.r*0.6, p.angle, 0, Math.PI*2); ctx.stroke(); ctx.lineWidth = 1;
+                }
+
+                ctx.fillStyle = p.color;
+                ctx.beginPath(); ctx.arc(px, py, p.r, 0, Math.PI*2); ctx.fill();
+
+                if(p.type === 'earth') {
+                    let mx = px + Math.cos(renderTime*3) * (p.r + 8); let my = py + Math.sin(renderTime*3) * (p.r + 8);
+                    ctx.fillStyle = '#bbb'; ctx.beginPath(); ctx.arc(mx, my, 3, 0, Math.PI*2); ctx.fill();
+                }
+            });
+
+            if(!isBlackHole && planets.length >= 2) {
+                ships.forEach(s => {
+                    s.progress += s.speed;
+                    if(s.progress >= 1) {
+                        s.progress = 0; s.p1 = s.p2;
+                        let next = Math.floor(Math.random()*planets.length);
+                        while(next === s.p1) next = Math.floor(Math.random()*planets.length);
+                        s.p2 = next;
+                    }
+                    
+                    let p1 = planets[s.p1]; let p2 = planets[s.p2];
+                    let x1 = centerX + Math.cos(p1.angle)*p1.orbit; let y1 = centerY + Math.sin(p1.angle)*p1.orbit;
+                    let x2 = centerX + Math.cos(p2.angle)*p2.orbit; let y2 = centerY + Math.sin(p2.angle)*p2.orbit;
+                    let sx = x1 + (x2-x1)*s.progress; let sy = y1 + (y2-y1)*s.progress;
+                    
+                    // Ship Evolution Visuals
+                    ctx.fillStyle = s.level > 3 ? '#00f3ff' : (s.level > 1 ? '#00ff66' : '#fff');
+                    let size = s.level > 3 ? 3 : (s.level > 1 ? 2 : 1.5);
+                    ctx.beginPath(); ctx.arc(sx, sy, size, 0, Math.PI*2); ctx.fill();
+                });
+            }
+
+            if(activeEvent && !isBlackHole) {
+                if(activeEvent.type === 'worm') {
+                    let progress = 1 - (activeEvent.time / activeEvent.maxTime);
+                    let wx = width * progress;
+                    ctx.strokeStyle = 'rgba(255, 0, 50, 0.8)';
+                    ctx.lineWidth = 15 + Math.sin(renderTime*10)*5;
+                    ctx.beginPath(); ctx.moveTo(wx, 0);
+                    for(let i=0; i<height; i+=50) ctx.lineTo(wx + (Math.random()-0.5)*100, i);
+                    ctx.stroke();
+                } else if(activeEvent.type === 'alien') {
+                    let ufoY = 100 + Math.sin(renderTime*3)*20; let ufoX = centerX + Math.cos(renderTime)*150;
+                    ctx.fillStyle = '#00f3ff'; ctx.beginPath(); ctx.ellipse(ufoX, ufoY, 20, 8, 0, 0, Math.PI*2); ctx.fill();
+                    ctx.fillStyle = '#00ff66'; ctx.beginPath(); ctx.arc(ufoX, ufoY-4, 8, 0, Math.PI*2); ctx.fill();
+                } else if(activeEvent.type === 'storm') {
+                    ctx.fillStyle = 'rgba(200, 0, 255, 0.1)';
+                    ctx.fillRect(0,0,width,height);
+                }
+            }
+
+            for(let i=particles.length-1; i>=0; i--) {
+                let p = particles[i];
+                p.x += p.vx; p.y += p.vy; p.vx *= 0.95; p.vy *= 0.95; p.life -= 0.02;
+                if(p.life <= 0) { particles.splice(i, 1); } 
+                else { ctx.globalAlpha = p.life; ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, Math.PI*2); ctx.fill(); ctx.globalAlpha = 1; }
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        function varColor(name, fallback) { return getComputedStyle(document.documentElement).getPropertyValue(name) || fallback; }
+
+        init(); requestAnimationFrame(draw);
+    </script>
+</body>
+</html>
