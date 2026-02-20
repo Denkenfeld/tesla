@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Cosmic Terraformer</title>
+    <style>
+        :root {
+            --primary: #00f3ff;
+            --secondary: #bc13fe;
+            --bg-color: #050510;
+            --panel-bg: rgba(15, 15, 30, 0.85);
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none; /* Verhindert Textmarkierung beim Tippen */
+            -webkit-user-select: none;
+        }
+
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--bg-color);
+            color: white;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            touch-action: none; /* Verhindert das Scrollen der Seite */
+        }
+
+        /* Der Canvas füllt den ganzen Bildschirm für die Grafik */
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        /* Das UI-Panel am rechten Rand */
+        #ui-panel {
+            position: absolute;
+            right: 20px;
+            top: 20px;
+            bottom: 20px;
+            width: 320px;
+            background: var(--panel-bg);
+            border: 1px solid rgba(0, 243, 255, 0.3);
+            border-radius: 20px;
+            padding: 20px;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 0 20px rgba(0, 243, 255, 0.1);
+        }
+
+        h1 {
+            margin: 0 0 10px 0;
+            font-size: 24px;
+            text-align: center;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px var(--primary);
+        }
+
+        #score-container {
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 15px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 15px;
+        }
+
+        #score {
+            font-size: 32px;
+            font-weight: bold;
+            color: #fff;
+            text-shadow: 0 0 10px var(--secondary);
+        }
+
+        .stats {
+            font-size: 14px;
+            color: #aaa;
+            margin-top: 5px;
+        }
+
+        /* Upgrade Buttons */
+        .upgrade-btn {
+            background: transparent;
+            border: 1px solid var(--primary);
+            color: white;
+            padding: 15px;
+            margin-bottom: 12px;
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .upgrade-btn:active {
+            transform: scale(0.95);
+            background: rgba(0, 243, 255, 0.2);
+        }
+
+        .upgrade-btn:disabled {
+            border-color: #444;
+            color: #666;
+            cursor: not-allowed;
+            transform: none;
+            background: transparent;
+        }
+
+        .btn-title {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .btn-cost {
+            font-size: 14px;
+            color: var(--primary);
+        }
+
+        #upgrades {
+            overflow-y: auto;
+            flex-grow: 1;
+            padding-right: 5px;
+        }
+
+        /* Scrollbar für das Panel unsichtbar machen */
+        #upgrades::-webkit-scrollbar {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-panel">
+        <h1>Terraformer</h1>
+        <div id="score-container">
+            <div id="score">0</div>
+            <div class="stats" id="sps">0 Staub / Sekunde</div>
+            <div class="stats" id="spc">1 Staub / Klick</div>
+        </div>
+
+        <div id="upgrades">
+            <button class="upgrade-btn" id="btn-click" onclick="buyUpgrade('click')">
+                <span class="btn-title">Sternen-Fokus (Klick +1)</span>
+                <span class="btn-cost" id="cost-click">Kosten: 20</span>
+            </button>
+            <button class="upgrade-btn" id="btn-sat" onclick="buyUpgrade('sat')">
+                <span class="btn-title">Satellit (+2/Sek)</span>
+                <span class="btn-cost" id="cost-sat">Kosten: 50</span>
+            </button>
+            <button class="upgrade-btn" id="btn-planet" onclick="buyUpgrade('planet')">
+                <span class="btn-title">Felsplanet (+15/Sek)</span>
+                <span class="btn-cost" id="cost-planet">Kosten: 500</span>
+            </button>
+            <button class="upgrade-btn" id="btn-ring" onclick="buyUpgrade('ring')">
+                <span class="btn-title">Neon-Ring (+100/Sek)</span>
+                <span class="btn-cost" id="cost-ring">Kosten: 4000</span>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- GAME STATE ---
+        let state = {
+            score: 0,
+            clickPower: 1,
+            scorePerSecond: 0,
+            costs: {
+                click: 20,
+                sat: 50,
+                planet: 500,
+                ring: 4000
+            },
+            objects: {
+                sats: 0,
+                planets: 0,
+                rings: 0
+            }
+        };
+
+        // --- DOM ELEMENTS ---
+        const scoreEl = document.getElementById('score');
+        const spsEl = document.getElementById('sps');
+        const spcEl = document.getElementById('spc');
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // --- CANVAS SETUP ---
+        let width, height, centerX, centerY;
+        function resizeCanvas() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+            // Zentraler Stern ist auf der linken Seite positioniert, damit das UI rechts Platz hat
+            centerX = width * 0.4; 
+            centerY = height / 2;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- VISUAL ELEMENTS ---
+        let particles = [];
+        let stars = [];
+
+        // Hintergrundsterne generieren
+        for(let i=0; i<150; i++) {
+            stars.push({
+                x: Math.random() * width,
+                y: Math.random() * height,
+                size: Math.random() * 1.5,
+                speed: Math.random() * 0.2
+            });
+        }
+
+        // --- GAME LOGIC ---
+        function buyUpgrade(type) {
+            if (state.score >= state.costs[type]) {
+                state.score -= state.costs[type];
+                
+                if (type === 'click') {
+                    state.clickPower += 1;
+                    state.costs.click = Math.floor(state.costs.click * 1.5);
+                    document.getElementById('cost-click').innerText = `Kosten: ${state.costs.click}`;
+                } else if (type === 'sat') {
+                    state.objects.sats += 1;
+                    state.scorePerSecond += 2;
+                    state.costs.sat = Math.floor(state.costs.sat * 1.2);
+                    document.getElementById('cost-sat').innerText = `Kosten: ${state.costs.sat}`;
+                } else if (type === 'planet') {
+                    state.objects.planets += 1;
+                    state.scorePerSecond += 15;
+                    state.costs.planet = Math.floor(state.costs.planet * 1.3);
+                    document.getElementById('cost-planet').innerText = `Kosten: ${state.costs.planet}`;
+                } else if (type === 'ring') {
+                    state.objects.rings += 1;
+                    state.scorePerSecond += 100;
+                    state.costs.ring = Math.floor(state.costs.ring * 1.4);
+                    document.getElementById('cost-ring').innerText = `Kosten: ${state.costs.ring}`;
+                }
+                updateUI();
+            }
+        }
+
+        function updateUI() {
+            scoreEl.innerText = Math.floor(state.score);
+            spsEl.innerText = `${state.scorePerSecond} Staub / Sekunde`;
+            spcEl.innerText = `${state.clickPower} Staub / Klick`;
+
+            // Buttons de-/aktivieren basierend auf Kontostand
+            document.getElementById('btn-click').disabled = state.score < state.costs.click;
+            document.getElementById('btn-sat').disabled = state.score < state.costs.sat;
+            document.getElementById('btn-planet').disabled = state.score < state.costs.planet;
+            document.getElementById('btn-ring').disabled = state.score < state.costs.ring;
+        }
+
+        // Idle Generation Loop (1x pro Sekunde)
+        setInterval(() => {
+            state.score += state.scorePerSecond;
+            updateUI();
+        }, 1000);
+
+        // --- INPUT HANDLING ---
+        function handleInteraction(e) {
+            // Verhindern von Standard-Klicks bei Touch
+            if(e.type === 'touchstart') e.preventDefault();
+
+            let x = e.clientX || (e.touches && e.touches[0].clientX);
+            let y = e.clientY || (e.touches && e.touches[0].clientY);
+
+            // Prüfen ob der Klick nah am Zentrum war (Hitbox des Sterns)
+            let dist = Math.hypot(x - centerX, y - centerY);
+            if (dist < 100) { // 100px Radius
+                state.score += state.clickPower;
+                updateUI();
+                createParticles(x, y);
+            }
+        }
+
+        canvas.addEventListener('mousedown', handleInteraction);
+        canvas.addEventListener('touchstart', handleInteraction, {passive: false});
+
+        function createParticles(x, y) {
+            for(let i=0; i<5; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    life: 1,
+                    color: Math.random() > 0.5 ? '#00f3ff' : '#bc13fe'
+                });
+            }
+        }
+
+        // --- RENDER LOOP ---
+        let time = 0;
+        function draw() {
+            // Leicht transparenter Hintergrund für Bewegungsunschärfe (Trails)
+            // Sehr ressourcenschonend im Vergleich zu echten Schatten-Effekten
+            ctx.fillStyle = 'rgba(5, 5, 16, 0.3)'; 
+            ctx.fillRect(0, 0, width, height);
+            
+            time += 0.01;
+
+            // Zeichne Hintergrundsterne
+            ctx.fillStyle = '#ffffff';
+            stars.forEach(star => {
+                star.x -= star.speed;
+                if(star.x < 0) star.x = width;
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            // Zeichne Ringe (Orbits)
+            for(let i=0; i<state.objects.rings; i++) {
+                ctx.beginPath();
+                ctx.arc(centerX, centerY, 150 + (i*40), 0, Math.PI*2);
+                ctx.strokeStyle = `rgba(188, 19, 254, ${0.2 + (Math.sin(time*2 + i)*0.1)})`;
+                ctx.lineWidth = 4;
+                ctx.stroke();
+            }
+
+            // Zeichne Planeten
+            for(let i=0; i<state.objects.planets; i++) {
+                let angle = time * (0.5 - (i*0.05)) + (i * Math.PI/2);
+                let radius = 180 + (i * 30);
+                let px = centerX + Math.cos(angle) * radius;
+                let py = centerY + Math.sin(angle) * radius;
+                
+                ctx.beginPath();
+                ctx.arc(px, py, 12, 0, Math.PI * 2);
+                ctx.fillStyle = '#bc13fe';
+                ctx.fill();
+            }
+
+            // Zeichne Satelliten
+            for(let i=0; i<state.objects.sats; i++) {
+                let angle = time * (1.2 - (i*0.1)) + (i * Math.PI/4);
+                let radius = 100 + (i * 10);
+                let px = centerX + Math.cos(angle) * radius;
+                let py = centerY + Math.sin(angle) * radius;
+                
+                ctx.beginPath();
+                ctx.arc(px, py, 4, 0, Math.PI * 2);
+                ctx.fillStyle = '#00f3ff';
+                ctx.fill();
+            }
+
+            // Zeichne den zentralen Stern (pulsierend)
+            let pulse = Math.sin(time * 3) * 5;
+            let starGradient = ctx.createRadialGradient(centerX, centerY, 10, centerX, centerY, 60 + pulse);
+            starGradient.addColorStop(0, '#ffffff');
+            starGradient.addColorStop(0.2, '#00f3ff');
+            starGradient.addColorStop(1, 'transparent');
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 80 + pulse, 0, Math.PI * 2);
+            ctx.fillStyle = starGradient;
+            ctx.fill();
+
+            // Zeichne Partikel
+            for(let i=particles.length-1; i>=0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.05;
+
+                if(p.life <= 0) {
+                    particles.splice(i, 1);
+                } else {
+                    ctx.globalAlpha = p.life;
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 3, 0, Math.PI*2);
+                    ctx.fill();
+                    ctx.globalAlpha = 1;
+                }
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        // Init UI and Start Loop
+        updateUI();
+        draw();
+    </script>
+</body>
+</html>
