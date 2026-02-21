@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>MOON FACTORY • Singularity</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+    body { margin:0; padding:0; overflow:hidden; background:#000; font-family:sans-serif; touch-action:none; color:#0ff; }
+    canvas { display:block; }
+    #ui { position:absolute; inset:0; pointer-events:none; z-index:10; display:flex; flex-direction:column; }
+    #top { background:rgba(0,15,40,0.95); padding:12px 20px; display:flex; justify-content:space-between; align-items:center; font-size:22px; font-weight:600; border-bottom:2px solid #0ff4; }
+    #toolbar { background:rgba(0,15,40,0.92); padding:12px; display:flex; flex-wrap:wrap; gap:12px; justify-content:center; pointer-events:auto; }
+    .tool { 
+        width:96px; height:96px; background:rgba(10,30,60,0.9); border:3px solid #0ff; border-radius:16px; 
+        display:flex; flex-direction:column; align-items:center; justify-content:center; font-size:13px; color:#0ff; 
+        transition:0.2s; position:relative; cursor:pointer;
+    }
+    .tool:active { background:#0ff; color:#000; transform:scale(0.9); }
+    .tool .cost { position:absolute; bottom:4px; font-size:11px; color:#0f0; }
+    #side { position:absolute; right:16px; top:90px; width:340px; background:rgba(0,15,40,0.95); border:3px solid #0ff; border-radius:20px; padding:20px; display:none; pointer-events:auto; }
+    #log { position:absolute; bottom:16px; left:16px; width:420px; max-height:180px; overflow:auto; background:rgba(0,0,0,0.75); padding:14px; border-radius:12px; font-size:14.5px; pointer-events:auto; border:1px solid #0ff3; line-height:1.45; }
+    .glow { text-shadow:0 0 12px #0ff; }
+    #tutorial { position:absolute; top:80px; left:50%; transform:translateX(-50%); background:rgba(0,30,60,0.98); border:3px solid #0ff; border-radius:20px; padding:20px 30px; max-width:420px; text-align:center; display:none; pointer-events:auto; }
+    #side button { cursor:pointer; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="ui">
+    <div id="top">
+        <div><strong>MOON FACTORY</strong> — Phase <span id="phase">1</span></div>
+        <div style="display:flex; gap:32px;">
+            <div>🌑 Reg <span id="r1">200</span></div>
+            <div>🔩 Met <span id="r2">0</span></div>
+            <div>🛰️ Sat <span id="sats">0</span></div>
+            <div>☀️ <span id="dys">0</span>%</div>
+        </div>
+        <div id="power" style="font-size:20px;">0 MW</div>
+    </div>
+    <div id="toolbar"></div>
+    <div id="side">
+        <div id="selName" style="font-size:24px; margin-bottom:12px;"></div>
+        <div id="selInfo" style="line-height:1.6;"></div>
+        <div style="display:flex; gap:10px; margin-top:20px;">
+            <button onclick="upgradeSel()" style="flex:1; padding:12px; background:#0ff; color:#000; border:none; border-radius:12px; font-size:16px;">Upgrade</button>
+            <button onclick="startMoveSel()" style="flex:1; padding:12px; background:#09f; color:#000; border:none; border-radius:12px; font-size:16px;">Verschieben</button>
+        </div>
+        <button onclick="destroySel()" style="margin-top:12px; width:100%; padding:12px; background:#f33; color:#fff; border:none; border-radius:12px; font-size:16px;">Löschen (50% Refund)</button>
+    </div>
+    <div id="log"></div>
+    
+    <!-- Tutorial Overlay -->
+    <div id="tutorial">
+        <strong style="font-size:20px;">Willkommen auf dem Mond!</strong><br><br>
+        <span style="font-size:16px; line-height:1.6;">
+            1. Tippe auf <strong>⛏️ Miner</strong> (kostenlos)<br>
+            2. Tippe auf die graue Fläche, um Miner zu bauen<br>
+            3. Baue <strong>🔥 Smelter</strong> direkt daneben (Reg → Metal)<br>
+            4. Baue <strong>🛰️ Factory</strong> neben einen Smelter<br>
+            5. Baue <strong>📦 Lager</strong> zwischen Factory und <strong>🚀 Launcher</strong><br><br>
+            Pulsierende Linien = aktiver Flow • Rot = kein Input<br>
+            Grün/Gelb/Rot zeigen die Produktions-Effizienz.
+            <br><br>
+            <strong>Ziehe mit einem Finger</strong> um die Karte zu bewegen<br>
+            <strong>Zwei Finger</strong> zum Zoomen
+        </span><br><br>
+        <button onclick="this.parentElement.style.display='none'" style="padding:12px 28px; background:#0ff; color:#000; border:none; border-radius:12px; font-size:17px;">Verstanden – los geht’s!</button>
+    </div>
+</div>
+
+<script>
+// ==================== MOON FACTORY – sichtbarer Flow & Logistik ====================
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, camX = 300, camY = 200, zoom = 1.1;
+
+let resources = { reg: 420, metal: 0, sats: 0 }; // sats = im Lager / produzierter Vorrat
+let dyson = 0;
+let phase = 1;
+let buildings = [];
+let links = [];    // Verbindungen zwischen Gebäuden (für Flow-Visualisierung)
+let items = [];    // optional (kannst du später für physische Items nutzen)
+let particles = [];
+
+const TILE = 110;
+
+// Building-Typen
+const BUILDINGS = {
+    miner:   {name:"Regolith Miner",    emoji:"⛏️", color:"#777", cost:{reg:0},                 w:1, h:1, prod:"reg",    rate:5},
+    smelter: {name:"Smelter",           emoji:"🔥", color:"#f80", cost:{reg:120},              w:1, h:1, prod:"metal",  rate:2.5, needs:"reg"},
+    factory: {name:"Satellite Factory", emoji:"🛰️", color:"#0bf", cost:{reg:420, metal:80},    w:2, h:2, prod:"sat",    rate:1,   needs:"metal"},
+    storage: {name:"Lager",             emoji:"📦", color:"#09c", cost:{reg:260, metal:60},    w:1, h:1, prod:null,     rate:0},
+    launcher:{name:"Moon Launcher",     emoji:"🚀", color:"#f0f", cost:{reg:880, metal:220},   w:2, h:1, prod:"launch", rate:0.5, needs:"sat"}
+};
+
+class Building {
+    constructor(x,y,type) {
+        this.x = x;
+        this.y = y;
+        this.type = type;
+        this.t = BUILDINGS[type];
+        this.progress = 0;
+        this.level = 1;
+        this.eff = 0;          // geglättete Effizienz 0..1
+        this.status = 'idle';  // 'ok', 'noInput', 'blocked', 'idle'
+        this.hasInputChain = false; // hat funktionierende Input-Kette?
+        this.hasSatChain = false;   // nur für Launcher: Factory→Lager→Launcher?
+    }
+}
+
+let selectedTool = null;
+let selected = null;
+let moveMode = false;
+let movingBuilding = null;
+
+// Touch / Pointer
+let touches = {};
+canvas.addEventListener('pointerdown', e => {
+    touches[e.pointerId] = {x:e.clientX, y:e.clientY};
+    const wx = (e.clientX - camX) / zoom;
+    const wy = (e.clientY - camY) / zoom;
+    const gx = Math.floor(wx / TILE);
+    const gy = Math.floor(wy / TILE);
+
+    // Move-Modus: nächster Klick setzt neue Position
+    if (moveMode && movingBuilding) {
+        if (!buildings.some(b => b.x === gx && b.y === gy)) {
+            movingBuilding.x = gx;
+            movingBuilding.y = gy;
+            log('🏗 Gebäude verschoben');
+            moveMode = false;
+            movingBuilding = null;
+            selected = null;
+            document.getElementById('side').style.display = 'none';
+            rebuildLinks();
+        } else {
+            log('❌ Feld belegt – wähle ein anderes Feld', '#f66');
+        }
+        return;
+    }
+
+    if (selectedTool) {
+        if (!buildings.some(b => b.x === gx && b.y === gy)) {
+            const t = BUILDINGS[selectedTool];
+            if (canAfford(t.cost)) {
+                pay(t.cost);
+                const b = new Building(gx, gy, selectedTool);
+                buildings.push(b);
+                rebuildLinks();
+                log(`✅ ${t.name} gebaut`);
+            } else {
+                log('❌ Nicht genug Ressourcen!', '#f66');
+            }
+        }
+    } else {
+        selected = buildings.find(b => gx >= b.x && gx < b.x + b.t.w && gy >= b.y && gy < b.y + b.t.h);
+        if (selected) {
+            document.getElementById('side').style.display = 'block';
+            updateSideInfo();
+        } else {
+            document.getElementById('side').style.display = 'none';
+        }
+    }
+});
+
+canvas.addEventListener('pointermove', e => {
+    if (touches[e.pointerId]) {
+        camX += (e.clientX - touches[e.pointerId].x) * 1.6;
+        camY += (e.clientY - touches[e.pointerId].y) * 1.6;
+        touches[e.pointerId] = {x:e.clientX, y:e.clientY};
+    }
+});
+canvas.addEventListener('pointerup', e => delete touches[e.pointerId]);
+canvas.addEventListener('pointercancel', e => delete touches[e.pointerId]);
+canvas.addEventListener('wheel', e => {
+    zoom *= e.deltaY < 0 ? 1.15 : 0.87;
+    zoom = Math.max(0.5, Math.min(3.5, zoom));
+});
+
+// Ressourcen
+function canAfford(cost) {
+    return (cost.reg === undefined || resources.reg >= cost.reg) &&
+           (cost.metal === undefined || resources.metal >= cost.metal);
+}
+function pay(cost) {
+    if (cost.reg) resources.reg -= cost.reg;
+    if (cost.metal) resources.metal -= cost.metal;
+}
+
+// Log
+function log(txt, col = '#0f0') {
+    const l = document.getElementById('log');
+    const time = (Date.now() % 100000).toString().padStart(5,'0');
+    l.innerHTML = `<span style="color:${col}">[${time}]</span> ${txt}<br>` + l.innerHTML;
+    if (l.children.length > 18) l.removeChild(l.lastChild);
+}
+
+// Upgrade / Verschieben / Löschen
+function updateSideInfo() {
+    if (!selected) return;
+    document.getElementById('selName').innerHTML =
+        selected.t.emoji + ' ' + selected.t.name + ` <small>(Lv.${selected.level})</small>`;
+    const effPercent = Math.round(selected.eff * 100);
+    document.getElementById('selInfo').innerHTML = `
+        Produktion: <b>${(selected.t.rate * selected.level).toFixed(1)}/s</b><br>
+        Effizienz: <b>${effPercent}%</b><br>
+        Kosten Upgrade: ${selected.t.rate > 0 ? (selected.level * 280) + ' Metal' : '—'}
+    `;
+}
+
+function upgradeSel() {
+    if (!selected) return;
+    if (!selected.t.rate) { // Lager etc.
+        log('ℹ Dieses Gebäude kann nicht verbessert werden.', '#6cf');
+        return;
+    }
+    const cost = selected.level * 280;
+    if (resources.metal >= cost) {
+        resources.metal -= cost;
+        selected.level++;
+        log('✅ Upgrade erfolgreich!');
+        updateSideInfo();
+    } else log('❌ Nicht genug Metal!', '#f66');
+}
+
+function startMoveSel() {
+    if (!selected) return;
+    moveMode = true;
+    movingBuilding = selected;
+    selected = null;
+    document.getElementById('side').style.display = 'none';
+    log('↔ Bewegungsmodus: tippe auf ein freies Feld zum Verschieben.');
+}
+
+function destroySel() {
+    if (!selected) return;
+    const idx = buildings.indexOf(selected);
+    if (idx >= 0) {
+        const cost = selected.t.cost || {};
+        if (cost.reg) resources.reg += Math.floor(cost.reg * 0.5);
+        if (cost.metal) resources.metal += Math.floor(cost.metal * 0.5);
+        log('🗑 Gebäude entfernt – 50% der Kosten zurückerstattet.');
+        buildings.splice(idx, 1);
+        selected = null;
+        document.getElementById('side').style.display = 'none';
+        rebuildLinks();
+    }
+}
+
+// Toolbar mit Kosten
+function makeToolbar() {
+    const tb = document.getElementById('toolbar');
+    tb.innerHTML = '';
+    Object.keys(BUILDINGS).forEach(k => {
+        const b = BUILDINGS[k];
+        let costStr = '';
+        if (!b.cost || (b.cost.reg === 0 && !b.cost.metal)) {
+            costStr = 'FREE';
+        } else {
+            const parts = [];
+            if (b.cost.reg) parts.push(b.cost.reg + ' Reg');
+            if (b.cost.metal) parts.push(b.cost.metal + ' Met');
+            costStr = parts.join(' + ');
+        }
+        const el = document.createElement('div');
+        el.className = 'tool';
+        el.innerHTML = `${b.emoji}<br><small>${b.name}</small><div class="cost">${costStr}</div>`;
+        el.onclick = () => { selectedTool = k; moveMode = false; movingBuilding = null; log(`Werkzeug: ${b.name} ausgewählt (${costStr})`); };
+        tb.appendChild(el);
+    });
+    const clear = document.createElement('div');
+    clear.className = 'tool';
+    clear.innerHTML = '🖐<br><small>Auswählen / Verschieben</small>';
+    clear.onclick = () => { selectedTool = null; moveMode = false; movingBuilding = null; };
+    tb.appendChild(clear);
+}
+
+// Hilfsfunktionen für Nachbarschaft & Links
+function isNeighbor(a, b) {
+    const dx = Math.max(a.x, b.x) - Math.min(a.x + (a.t.w || 1), b.x);
+    const dy = Math.max(a.y, b.y) - Math.min(a.y + (a.t.h || 1), b.y);
+    // vereinfachtes Grid-Nachbarschaft: direkt orthogonal angrenzend
+    return (Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1);
+}
+
+function rebuildLinks() {
+    links = [];
+    for (let i = 0; i < buildings.length; i++) {
+        for (let j = 0; j < buildings.length; j++) {
+            if (i === j) continue;
+            const A = buildings[i];
+            const B = buildings[j];
+            if (!isNeighbor(A, B)) continue;
+
+            // Regolith-Flow: Miner -> Smelter
+            if (A.type === 'miner' && B.type === 'smelter') {
+                links.push({from:i, to:j, kind:'reg', phase:0, active:false, noInput:false, speed:0});
+            }
+            // Metal-Flow: Smelter -> Factory
+            if (A.type === 'smelter' && B.type === 'factory') {
+                links.push({from:i, to:j, kind:'metal', phase:0, active:false, noInput:false, speed:0});
+            }
+            // Sat-Flow: Factory -> Storage
+            if (A.type === 'factory' && B.type === 'storage') {
+                links.push({from:i, to:j, kind:'sat', phase:0, active:false, noInput:false, speed:0});
+            }
+            // Sat-Flow: Storage -> Launcher
+            if (A.type === 'storage' && B.type === 'launcher') {
+                links.push({from:i, to:j, kind:'sat', phase:0, active:false, noInput:false, speed:0});
+            }
+        }
+    }
+}
+
+// DRAW
+function drawLinks() {
+    links.forEach(l => {
+        const A = buildings[l.from];
+        const B = buildings[l.to];
+        const ax = camX + (A.x + A.t.w/2) * TILE * zoom;
+        const ay = camY + (A.y + A.t.h/2) * TILE * zoom;
+        const bx = camX + (B.x + B.t.w/2) * TILE * zoom;
+        const by = camY + (B.y + B.t.h/2) * TILE * zoom;
+
+        let col;
+        if (l.noInput) col = '#f44';
+        else if (l.active) col = '#0ff';
+        else col = '#2244ff';
+
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 3 * zoom;
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(bx, by);
+        ctx.stroke();
+
+        // Impulslichter auf aktiven Links
+        if (l.active) {
+            const steps = 4;
+            for (let i = 0; i < steps; i++) {
+                const t = (i / steps + l.phase) % 1;
+                const px = ax + (bx - ax) * t;
+                const py = ay + (by - ay) * t;
+                ctx.fillStyle = '#fff';
+                ctx.beginPath();
+                ctx.arc(px, py, 5 * zoom, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+    });
+}
+
+function draw() {
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0,0,W,H);
+    
+    // Grid
+    ctx.strokeStyle = '#222';
+    ctx.lineWidth = 2;
+    for (let x = -30; x < 50; x++) {
+        ctx.beginPath();
+        ctx.moveTo(camX + x*TILE*zoom, camY - 2000);
+        ctx.lineTo(camX + x*TILE*zoom, camY + 2000);
+        ctx.stroke();
+    }
+    for (let y = -30; y < 50; y++) {
+        ctx.beginPath();
+        ctx.moveTo(camX - 2000, camY + y*TILE*zoom);
+        ctx.lineTo(camX + 2000, camY + y*TILE*zoom);
+        ctx.stroke();
+    }
+
+    // Transport- & Daten-Flow-Layer
+    drawLinks();
+    
+    // Buildings
+    buildings.forEach(b => {
+        const px = camX + b.x * TILE * zoom;
+        const py = camY + b.y * TILE * zoom;
+        const bw = b.t.w * TILE * zoom;
+        const bh = b.t.h * TILE * zoom;
+
+        // Gebäude-Grundfläche
+        ctx.fillStyle = b.t.color;
+        ctx.fillRect(px, py, bw, bh);
+
+        // leichte Outline
+        ctx.strokeStyle = '#0ff6';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(px, py, bw, bh);
+
+        // Emoji
+        ctx.fillStyle = '#fff';
+        ctx.font = `${52*zoom}px sans-serif`;
+        ctx.fillText(b.t.emoji, px + 18*zoom, py + 62*zoom);
+
+        // Fortschrittsbalken (nur für produktive Gebäude)
+        if (b.t.rate > 0) {
+            let col;
+            if (b.status === 'noInput') col = '#f33';
+            else {
+                if (b.eff > 0.7) col = '#0f0';
+                else if (b.eff > 0.2) col = '#ff0';
+                else col = '#f33';
+            }
+            const barW = (bw - 20*zoom) * (b.progress / 100);
+            ctx.fillStyle = '#0008';
+            ctx.fillRect(px + 10*zoom, py + bh - 18*zoom, bw - 20*zoom, 10*zoom);
+            ctx.fillStyle = col;
+            ctx.fillRect(px + 10*zoom, py + bh - 18*zoom, barW, 10*zoom);
+        }
+
+        // Statusindikator
+        if (b.status === 'noInput' && b.t.rate > 0) {
+            ctx.fillStyle = '#f55';
+            ctx.font = `${16*zoom}px sans-serif`;
+            ctx.fillText('NO INPUT', px + 10*zoom, py + 20*zoom);
+        } else if (b.status === 'blocked') {
+            ctx.fillStyle = '#f5f';
+            ctx.font = `${16*zoom}px sans-serif`;
+            ctx.fillText('BLOCKED', px + 10*zoom, py + 20*zoom);
+        }
+    });
+    
+    // Optionale Items (Platzhalter für physische Transportobjekte)
+    for (let i = items.length-1; i >= 0; i--) {
+        let it = items[i];
+        it.x += 4.5;
+        ctx.fillStyle = '#ff0';
+        ctx.fillRect(camX + it.x*zoom, camY + it.y*zoom, 26*zoom, 26*zoom);
+        if (it.x > it.target) items.splice(i,1);
+    }
+    
+    // Launch-Effekt
+    for (let i = particles.length-1; i >= 0; i--) {
+        let p = particles[i];
+        p.x += p.vx; p.y += p.vy; p.life--;
+        ctx.globalAlpha = p.life/50;
+        ctx.fillStyle = '#0ff';
+        ctx.fillRect(camX + p.x*zoom, camY + p.y*zoom, 18*zoom, 18*zoom);
+        if (p.life<=0) particles.splice(i,1);
+    }
+    ctx.globalAlpha = 1;
+}
+
+// GAME TICK – Produktion & Flow
+function gameTick() {
+    // 1) Input-Ketten erkennen
+    buildings.forEach(b => {
+        b.hasInputChain = false;
+        b.hasSatChain = false;
+
+        if (!b.t.rate) {
+            b.status = 'idle';
+            return;
+        }
+
+        if (b.type === 'miner') {
+            b.hasInputChain = true; // braucht keinen Input
+        } else if (b.type === 'smelter') {
+            b.hasInputChain = buildings.some(o => isNeighbor(b,o) && o.type === 'miner');
+        } else if (b.type === 'factory') {
+            b.hasInputChain = buildings.some(o => isNeighbor(b,o) && o.type === 'smelter');
+        } else if (b.type === 'launcher') {
+            const storages = buildings.filter(o => isNeighbor(b,o) && o.type === 'storage');
+            b.hasInputChain = storages.length > 0;
+            b.hasSatChain = storages.some(st =>
+                buildings.some(o => isNeighbor(st,o) && o.type === 'factory')
+            );
+        } else {
+            b.hasInputChain = true;
+        }
+
+        if (!b.hasInputChain) b.status = 'noInput';
+        else b.status = 'ok';
+    });
+
+    // 2) Fortschritt & Produktion
+    buildings.forEach(b => {
+        if (!b.t.rate) return; // Lager etc.
+
+        const base = b.t.rate * b.level;
+        const canWork = b.status === 'ok';
+        const speed = canWork ? base : 0;
+        const targetEff = canWork ? 1 : 0;
+        b.eff = b.eff * 0.85 + targetEff * 0.15;
+
+        b.progress += speed * 0.6;
+        if (b.progress >= 100) {
+            b.progress -= 100;
+            if (b.t.prod === "reg") {
+                resources.reg += 4 * b.level;
+            }
+            if (b.t.prod === "metal" && b.hasInputChain) {
+                // optional: Reg-Kosten einbauen
+                resources.metal += 3 * b.level;
+            }
+            if (b.t.prod === "sat" && b.hasInputChain) {
+                resources.sats += 1;
+            }
+            if (b.t.prod === "launch") {
+                if (b.hasSatChain && resources.sats > 0) {
+                    resources.sats--;
+                    dyson = Math.min(100, dyson + 2.8);
+                    particles.push({
+                        x: b.x*TILE + TILE,
+                        y: b.y*TILE + 40,
+                        vx: 22,
+                        vy: -15,
+                        life: 50
+                    });
+                    log('🚀 SATELLIT IN ORBIT!');
+                    if (dyson >= 100) {
+                        log('<span style="color:#f0f;font-size:19px">🌌 SINGULARITÄT ERREICHT! DU HAST GEWONNEN.</span>');
+                    }
+                } else {
+                    b.status = 'noInput';
+                }
+            }
+        }
+    });
+
+    // 3) Links aktualisieren (aktiv / noInput / Puls-Geschwindigkeit)
+    links.forEach(l => {
+        const src = buildings[l.from];
+        const dst = buildings[l.to];
+        if (!src || !dst) return;
+
+        // Standard: Link ist "aktiv", wenn Quelle produktiv und Ziel nicht im noInput hängt
+        let active = (src.status === 'ok' && dst.status !== 'noInput');
+        let speed = 0;
+
+        if (l.kind === 'reg' && src.type === 'miner') {
+            speed = src.t.rate * src.level;
+        } else if (l.kind === 'metal' && src.type === 'smelter') {
+            speed = src.t.rate * src.level;
+        } else if (l.kind === 'sat') {
+            // Sat-Links werden aktiv, wenn Factory / Launcher-Kette aktiv + Sats vorhanden
+            if (src.type === 'factory') {
+                active = (src.status === 'ok' && resources.sats > 0);
+                speed = src.t.rate * src.level;
+            } else if (src.type === 'storage' && dst.type === 'launcher') {
+                active = (dst.status === 'ok' && resources.sats > 0);
+                speed = 2;
+            }
+        }
+
+        l.active = active;
+        l.noInput = (dst.status === 'noInput');
+        l.speed = speed;
+        if (l.active) {
+            l.phase = (l.phase + 0.03 + (l.speed || 1) * 0.01) % 1;
+        } else {
+            l.phase = (l.phase * 0.95) % 1;
+        }
+    });
+
+    // 4) UI aktualisieren
+    document.getElementById('r1').textContent = Math.floor(resources.reg);
+    document.getElementById('r2').textContent = Math.floor(resources.metal);
+    document.getElementById('sats').textContent = resources.sats;
+    document.getElementById('dys').textContent = dyson.toFixed(0);
+    document.getElementById('phase').textContent = phase;
+    document.getElementById('power').textContent = (buildings.length * 65 + Math.floor(dyson*12)) + ' MW';
+    
+    if (dyson > 30 && phase === 1) phase = 2;
+
+    if (selected) updateSideInfo();
+}
+
+// Animation loop
+function loop() {
+    W = canvas.width = window.innerWidth;
+    H = canvas.height = window.innerHeight;
+    draw();
+    requestAnimationFrame(loop);
+}
+
+// Init + Tutorial
+makeToolbar();
+log('👋 Willkommen Commander!');
+log('Baue eine sichtbare Kette: Miner → Smelter → Factory → Lager → Launcher.');
+log('Linien pulsieren bei aktivem Flow, rot = kein Input.');
+document.getElementById('tutorial').style.display = 'block';
+
+setInterval(gameTick, 160);
+loop();
+</script>
+</body>
+</html>
