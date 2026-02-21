@@ -1,0 +1,1249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dune: Idle Arrakis</title>
+    <style>
+        :root {
+            --bg-color: #1a1105;
+            --panel-bg: #2b1d0f;
+            --text-main: #f4d092;
+            --spice-color: #ff8c00;
+            --accent: #d35400;
+            --military: #c0392b;
+            --disabled: #555;
+            --threat: #8e44ad;
+        }
+        * { box-sizing: border-box; user-select: none; -webkit-user-select: none; }
+        body {
+            margin: 0; padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color); color: var(--text-main);
+            display: flex; height: 100vh; overflow: hidden;
+        }
+        .container { display: flex; width: 100%; height: 100%; }
+
+        /* --- MAP PANEL --- */
+        .desert-panel {
+            flex: 1.8; position: relative;
+            border-right: 2px solid var(--accent);
+            overflow: hidden;
+            background: #0d0700;
+        }
+        #map-canvas { display: block; width: 100%; height: 100%; cursor: crosshair; }
+
+        /* Overlays */
+        .combat-header {
+            position: absolute; top: 0; left: 0; width: 100%;
+            background: rgba(0,0,0,0.75); padding: 10px 15px; border-bottom: 2px solid var(--threat);
+            display: flex; flex-direction: column; align-items: center; z-index: 10;
+            pointer-events: none;
+        }
+        .combat-stats { display: flex; gap: 30px; font-size: 1.1rem; font-weight: bold; }
+        .stat-mil { color: #e74c3c; }
+        .stat-enemy { color: var(--threat); }
+        .threat-bar-container { width: 80%; height: 8px; background: #222; margin-top: 8px; border-radius: 5px; overflow: hidden; }
+        .threat-bar { height: 100%; background: linear-gradient(90deg, var(--threat), #ff00ff); width: 0%; transition: width 0.5s linear; }
+
+        .economy-header {
+            position: absolute; top: 55px; left: 50%; transform: translateX(-50%);
+            text-align: center; z-index: 10; pointer-events: none;
+            background: rgba(0,0,0,0.5); border-radius: 8px; padding: 5px 20px;
+        }
+        .title { font-size: 1.1rem; letter-spacing: 3px; margin: 0; color: var(--spice-color); text-transform: uppercase; }
+        .spice-display { font-size: 2.8rem; font-weight: bold; margin: 2px 0; text-shadow: 0 0 15px var(--spice-color), 0 0 5px #ff4400; }
+        .spice-rate { font-size: 1rem; color: #aaa; }
+
+        .combat-log {
+            position: absolute; bottom: 55px; left: 50%; transform: translateX(-50%);
+            width: 85%; max-width: 500px;
+            background: rgba(0,0,0,0.6); border: 1px solid #555; border-radius: 5px;
+            padding: 8px 12px; text-align: center; color: #ccc; font-size: 0.9rem; z-index: 10;
+            pointer-events: none;
+        }
+
+        .controls { position: absolute; bottom: 12px; left: 15px; z-index: 10; }
+        button.utility-btn {
+            background-color: rgba(60,40,20,0.8); color: #aaa; border: 1px solid #555;
+            padding: 7px 12px; border-radius: 5px; font-size: 0.85rem; cursor: pointer;
+        }
+        button.utility-btn:hover { color: white; border-color: #888; }
+
+        /* Click hint */
+        .click-hint {
+            position: absolute; bottom: 12px; right: 15px; z-index: 10;
+            color: rgba(244,208,146,0.4); font-size: 0.8rem; pointer-events: none;
+        }
+
+        /* Floating Text */
+        .floating-text {
+            position: absolute; color: var(--spice-color); font-size: 1.8rem; font-weight: bold;
+            pointer-events: none; animation: floatUp 1s ease-out forwards; z-index: 20;
+            text-shadow: 0 0 10px var(--spice-color);
+        }
+        @keyframes floatUp {
+            0% { opacity: 1; transform: translateY(0) scale(1); }
+            50% { opacity: 1; transform: translateY(-40px) scale(1.2); }
+            100% { opacity: 0; transform: translateY(-90px) scale(0.8); }
+        }
+
+        /* --- BASE PANEL --- */
+        .base-panel {
+            flex: 1; background-color: var(--panel-bg); display: flex; flex-direction: column;
+            min-width: 300px;
+        }
+        .tabs { display: flex; border-bottom: 2px solid var(--accent); }
+        .tab {
+            flex: 1; padding: 15px; text-align: center; font-size: 1.1rem; font-weight: bold;
+            background: #1e130a; cursor: pointer; color: #888; transition: 0.2s;
+        }
+        .tab.active { background: var(--panel-bg); color: var(--text-main); border-top: 3px solid var(--accent); }
+
+        .upgrades-container { padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; flex: 1; }
+
+        .upgrade-card {
+            background-color: #3e2a17; border: 2px solid #555; border-radius: 10px;
+            padding: 12px; display: flex; justify-content: space-between; align-items: center;
+            cursor: pointer; transition: 0.15s;
+        }
+        .upgrade-card:hover { background-color: #4a321b; border-color: var(--accent); }
+        .upgrade-card.disabled { opacity: 0.38; cursor: not-allowed; border-color: var(--disabled); }
+        .mil-card:hover { border-color: var(--military); }
+
+        .upgrade-info h3 { margin: 0 0 3px 0; font-size: 1.1rem; }
+        .upgrade-info p { margin: 0; color: #bbb; font-size: 0.82rem; }
+        .upgrade-cost { font-size: 1.1rem; font-weight: bold; color: var(--spice-color); text-align: right; white-space: nowrap; }
+        .upgrade-count { font-size: 1.6rem; opacity: 0.4; margin-left: 12px; font-weight: bold; min-width: 30px; text-align: right; }
+
+        @media (max-width: 900px) {
+            .container { flex-direction: column; }
+            .desert-panel { flex: none; height: 55vh; border-right: none; border-bottom: 2px solid var(--accent); }
+            .base-panel { flex: none; height: 45vh; min-width: unset; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="desert-panel" id="desert">
+        <canvas id="map-canvas"></canvas>
+
+        <div class="combat-header">
+            <div class="combat-stats">
+                <div class="stat-mil">⚔️ Military: <span id="mil-power">0</span></div>
+                <div class="stat-enemy">🔴 Raiders: <span id="enemy-power">10</span></div>
+            </div>
+            <div class="threat-bar-container"><div class="threat-bar" id="threat-bar"></div></div>
+        </div>
+
+        <div class="economy-header">
+            <div class="title">Arrakis Command</div>
+            <div class="spice-display"><span id="spice-count">0</span> <span style="font-size:1.5rem;opacity:0.7">mg</span></div>
+            <div class="spice-rate">⬆ <span id="spice-rate">0</span> mg/sec</div>
+        </div>
+
+        <div class="combat-log" id="combat-log">Establish your base. Sand Raiders will attack soon.</div>
+
+        <div class="controls"><button class="utility-btn" onclick="wipeSave()">↺ Wipe Save</button></div>
+        <div class="click-hint">Click desert to harvest spice</div>
+    </div>
+
+    <div class="base-panel">
+        <div class="tabs">
+            <div class="tab active" id="tab-econ" onclick="switchTab('econ')">Economy</div>
+            <div class="tab" id="tab-mil" onclick="switchTab('mil')">Military</div>
+        </div>
+        <div class="upgrades-container" id="upgrades-container"></div>
+    </div>
+</div>
+
+<script>
+// =====================================================================
+// GAME STATE
+// =====================================================================
+let game = {
+    spice: 0,
+    clickPower: 1,
+    militaryPower: 0,
+    enemyPower: 10,
+    attackTimer: 30,
+    attackMaxTime: 30,
+    activeTab: 'econ',
+    buildings: [
+        { id: 'fremen',    type: 'econ', name: 'Fremen Gatherer',  icon: '👤', baseCost: 15,    cost: 15,    prod: 1,   count: 0, desc: '+1 mg/sec · Scouts appear on map' },
+        { id: 'harvester', type: 'econ', name: 'Mobile Harvester', icon: '🚜', baseCost: 150,   cost: 150,   prod: 10,  count: 0, desc: '+10 mg/sec · Drives to spice fields' },
+        { id: 'refinery',  type: 'econ', name: 'Spice Refinery',   icon: '🏭', baseCost: 1200,  cost: 1200,  prod: 60,  count: 0, desc: '+60 mg/sec · Visible on map' },
+        { id: 'silo',      type: 'econ', name: 'Spice Silo',       icon: '🏢', baseCost: 10000, cost: 10000, prod: 400, count: 0, desc: '+400 mg/sec · Fill shown on map' },
+        { id: 'barracks',  type: 'mil',  name: 'Infantry Barracks',icon: '⛺', baseCost: 200,   cost: 200,   prod: 0,   count: 0, desc: 'Trains infantry every 10s (+2 Mil Power)' },
+        { id: 'factory',   type: 'mil',  name: 'War Factory',      icon: '⚙️', baseCost: 1500,  cost: 1500,  prod: 0,   count: 0, desc: 'Builds tanks every 15s (+15 Mil Power)' }
+    ]
+};
+
+// =====================================================================
+// CANVAS MAP SYSTEM
+// =====================================================================
+const canvas = document.getElementById('map-canvas');
+const ctx = canvas.getContext('2d');
+
+// World space: 1000 x 650
+const W = 1000, H = 650;
+
+function toCanvas(wx, wy) {
+    return [wx / W * canvas.width, wy / H * canvas.height];
+}
+function fromCanvas(cx, cy) {
+    return [cx / canvas.width * W, cy / canvas.height * H];
+}
+
+// Fixed spice field locations (world space)
+const SPICE_FIELDS = [
+    { x: 720, y: 120, r: 50, glow: 0 },
+    { x: 860, y: 200, r: 40, glow: 0 },
+    { x: 640, y: 60,  r: 35, glow: 0 },
+    { x: 880, y: 450, r: 45, glow: 0 },
+    { x: 150, y: 100, r: 45, glow: 0 },
+    { x: 80,  y: 320, r: 38, glow: 0 },
+    { x: 300, y: 50,  r: 30, glow: 0 },
+    { x: 950, y: 350, r: 35, glow: 0 },
+];
+
+// Building slot positions (world space)
+const BUILDING_SLOTS = {
+    commandCenter: { x: 490, y: 490 },
+    refinery:  [{ x: 430, y: 340 }, { x: 540, y: 310 }, { x: 360, y: 370 }, { x: 610, y: 350 }, { x: 480, y: 270 }],
+    silo:      [{ x: 280, y: 430 }, { x: 320, y: 480 }, { x: 660, y: 440 }, { x: 700, y: 490 }, { x: 250, y: 500 }, { x: 740, y: 400 }],
+    barracks:  [{ x: 330, y: 530 }, { x: 290, y: 570 }, { x: 370, y: 570 }, { x: 250, y: 540 }],
+    factory:   [{ x: 620, y: 530 }, { x: 670, y: 560 }, { x: 570, y: 565 }, { x: 720, y: 520 }],
+};
+
+// Dune/terrain noise (pre-generated)
+let duneLines = [];
+function generateTerrain() {
+    duneLines = [];
+    for (let i = 0; i < 25; i++) {
+        const y = 50 + i * 26;
+        const pts = [];
+        for (let x = 0; x <= W; x += 40) {
+            pts.push({ x, y: y + Math.sin(x * 0.01 + i) * 15 + Math.sin(x * 0.025 + i * 2) * 8 });
+        }
+        duneLines.push({ pts, alpha: 0.03 + Math.random() * 0.05 });
+    }
+}
+generateTerrain();
+
+// =====================================================================
+// MAP ENTITIES
+// =====================================================================
+let entities = {
+    harvesters: [],   // { x,y, tx,ty, state, load, maxLoad, speed, fieldIdx, angle }
+    defenders: [],    // { x,y, type, hp, maxHp, angle, targetId }
+    raiders: [],      // { x,y, hp, maxHp, speed, angle, id, state }
+    fremen: [],       // { x,y, angle, timer }
+    particles: [],    // { x,y, vx,vy, life, maxLife, color, r }
+    combatFlash: 0,   // countdown for red flash
+};
+
+let entityIdCounter = 0;
+let lastSpiceField = 0; // index tracker for harvester assignment
+
+const HARVESTER_SPEED = 2.5;
+const RAIDER_SPEED    = 1.2;
+const DEFENDER_SPEED  = 1.8;
+
+// Harvester States
+const HS = { IDLE: 'idle', TO_FIELD: 'to_field', MINING: 'mining', TO_BASE: 'to_base', UNLOADING: 'unloading' };
+
+function spawnHarvester() {
+    const base = BUILDING_SLOTS.commandCenter;
+    const fieldIdx = entities.harvesters.length % SPICE_FIELDS.length;
+    entities.harvesters.push({
+        id: entityIdCounter++,
+        x: base.x + (Math.random() - 0.5) * 40,
+        y: base.y + 30,
+        tx: base.x, ty: base.y,
+        state: HS.TO_FIELD,
+        load: 0, maxLoad: 100,
+        speed: HARVESTER_SPEED * (0.8 + Math.random() * 0.4),
+        fieldIdx,
+        mineTimer: 0,
+        angle: 0,
+    });
+    // send to field
+    const f = SPICE_FIELDS[fieldIdx];
+    entities.harvesters[entities.harvesters.length-1].tx = f.x + (Math.random()-0.5)*30;
+    entities.harvesters[entities.harvesters.length-1].ty = f.y + (Math.random()-0.5)*30;
+}
+
+function spawnFremen() {
+    for (let i = 0; i < 3; i++) {
+        entities.fremen.push({
+            x: 400 + (Math.random() - 0.5) * 300,
+            y: 400 + (Math.random() - 0.5) * 200,
+            angle: Math.random() * Math.PI * 2,
+            timer: Math.random() * 200,
+            speed: 0.4 + Math.random() * 0.4,
+        });
+    }
+}
+
+function spawnDefender(type) {
+    const base = BUILDING_SLOTS.commandCenter;
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 60 + Math.random() * 40;
+    entities.defenders.push({
+        id: entityIdCounter++,
+        x: base.x + Math.cos(angle) * dist,
+        y: base.y + Math.sin(angle) * dist,
+        type, // 'infantry' or 'tank'
+        hp: type === 'tank' ? 50 : 20,
+        maxHp: type === 'tank' ? 50 : 20,
+        angle: Math.random() * Math.PI * 2,
+        targetId: null,
+        patrolAngle: angle,
+        patrolTimer: Math.random() * 100,
+    });
+}
+
+function spawnRaiderWave(count) {
+    const base = BUILDING_SLOTS.commandCenter;
+    for (let i = 0; i < count; i++) {
+        const edge = Math.floor(Math.random() * 4);
+        let x, y;
+        switch(edge) {
+            case 0: x = Math.random() * W; y = -20; break;
+            case 1: x = W + 20;            y = Math.random() * H; break;
+            case 2: x = Math.random() * W; y = H + 20; break;
+            case 3: x = -20;               y = Math.random() * H; break;
+        }
+        entities.raiders.push({
+            id: entityIdCounter++,
+            x, y,
+            tx: base.x + (Math.random()-0.5)*80,
+            ty: base.y + (Math.random()-0.5)*80,
+            hp: 10 + Math.floor(game.enemyPower * 0.3),
+            maxHp: 10 + Math.floor(game.enemyPower * 0.3),
+            speed: RAIDER_SPEED * (0.7 + Math.random() * 0.6),
+            angle: 0,
+            state: 'attacking',
+        });
+    }
+}
+
+function emitParticles(x, y, color, count=8, speed=3) {
+    for (let i = 0; i < count; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const s = speed * (0.5 + Math.random());
+        entities.particles.push({
+            x, y,
+            vx: Math.cos(angle) * s,
+            vy: Math.sin(angle) * s,
+            life: 30 + Math.random() * 30,
+            maxLife: 60,
+            color,
+            r: 2 + Math.random() * 3,
+        });
+    }
+}
+
+// =====================================================================
+// ENTITY UPDATE (called from render loop)
+// =====================================================================
+let mapTick = 0;
+
+function updateEntities(dt) {
+    mapTick++;
+    const base = BUILDING_SLOTS.commandCenter;
+
+    // --- HARVESTERS ---
+    entities.harvesters.forEach(h => {
+        if (h.state === HS.TO_FIELD || h.state === HS.TO_BASE) {
+            const dx = h.tx - h.x, dy = h.ty - h.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist > 3) {
+                h.angle = Math.atan2(dy, dx);
+                h.x += (dx/dist) * h.speed;
+                h.y += (dy/dist) * h.speed;
+            } else {
+                if (h.state === HS.TO_FIELD) {
+                    h.state = HS.MINING;
+                    h.mineTimer = 0;
+                } else {
+                    h.state = HS.UNLOADING;
+                    h.mineTimer = 0;
+                    // earn spice
+                    game.spice += h.load * 0.5;
+                    h.load = 0;
+                }
+            }
+        } else if (h.state === HS.MINING) {
+            h.mineTimer++;
+            h.load = Math.min(h.maxLoad, h.load + 0.5);
+            // Wobble slightly
+            h.x += Math.sin(mapTick * 0.1 + h.id) * 0.3;
+            if (h.load >= h.maxLoad || h.mineTimer > 200) {
+                h.state = HS.TO_BASE;
+                h.tx = base.x + (Math.random()-0.5)*30;
+                h.ty = base.y + 20;
+            }
+        } else if (h.state === HS.UNLOADING) {
+            h.mineTimer++;
+            if (h.mineTimer > 60) {
+                h.state = HS.TO_FIELD;
+                const f = SPICE_FIELDS[h.fieldIdx];
+                h.tx = f.x + (Math.random()-0.5)*30;
+                h.ty = f.y + (Math.random()-0.5)*30;
+            }
+        } else if (h.state === HS.IDLE) {
+            h.state = HS.TO_FIELD;
+            const f = SPICE_FIELDS[h.fieldIdx];
+            h.tx = f.x; h.ty = f.y;
+        }
+    });
+
+    // --- FREMEN ---
+    entities.fremen.forEach(f => {
+        f.timer++;
+        if (f.timer % 120 === 0) {
+            f.angle = Math.random() * Math.PI * 2;
+        }
+        f.x += Math.cos(f.angle) * f.speed;
+        f.y += Math.sin(f.angle) * f.speed;
+        // Bounce off edges
+        if (f.x < 100 || f.x > W-100) { f.angle = Math.PI - f.angle; f.x = Math.max(100, Math.min(W-100, f.x)); }
+        if (f.y < 50  || f.y > H-50)  { f.angle = -f.angle;          f.y = Math.max(50,  Math.min(H-50,  f.y)); }
+    });
+
+    // --- DEFENDERS (patrol & combat) ---
+    entities.defenders.forEach(d => {
+        d.patrolTimer++;
+        // Find nearest raider
+        let nearestRaider = null, nearestDist = 200;
+        entities.raiders.forEach(r => {
+            const dist = Math.hypot(r.x - d.x, r.y - d.y);
+            if (dist < nearestDist) { nearestDist = dist; nearestRaider = r; }
+        });
+
+        if (nearestRaider) {
+            // Chase
+            const dx = nearestRaider.x - d.x, dy = nearestRaider.y - d.y;
+            const dist = Math.hypot(dx, dy);
+            d.angle = Math.atan2(dy, dx);
+            if (dist > 20) {
+                d.x += (dx/dist) * (d.type === 'tank' ? 1.2 : 1.8);
+                d.y += (dy/dist) * (d.type === 'tank' ? 1.2 : 1.8);
+            } else {
+                // Attack!
+                nearestRaider.hp -= (d.type === 'tank' ? 2 : 0.8);
+                if (Math.random() < 0.1) emitParticles(nearestRaider.x, nearestRaider.y, '#ff4400', 3, 2);
+                if (nearestRaider.hp <= 0) {
+                    emitParticles(nearestRaider.x, nearestRaider.y, '#ff2200', 12, 4);
+                    entities.raiders = entities.raiders.filter(r => r.id !== nearestRaider.id);
+                }
+            }
+        } else {
+            // Patrol around base
+            if (d.patrolTimer % 80 === 0) {
+                d.patrolAngle += (Math.random() - 0.5) * 1.5;
+            }
+            const patrolR = d.type === 'tank' ? 90 : 70;
+            const px = base.x + Math.cos(d.patrolAngle) * patrolR;
+            const py = base.y + Math.sin(d.patrolAngle) * (patrolR * 0.5);
+            const dx = px - d.x, dy = py - d.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist > 5) {
+                d.angle = Math.atan2(dy, dx);
+                d.x += (dx/dist) * (d.type === 'tank' ? 0.8 : 1.2);
+                d.y += (dy/dist) * (d.type === 'tank' ? 0.8 : 1.2);
+            }
+            d.patrolAngle += 0.005;
+        }
+    });
+
+    // --- RAIDERS move toward base ---
+    entities.raiders.forEach(r => {
+        const dx = r.tx - r.x, dy = r.ty - r.y;
+        const dist = Math.hypot(dx, dy);
+        r.angle = Math.atan2(dy, dx);
+        if (dist > 5) {
+            r.x += (dx/dist) * r.speed;
+            r.y += (dy/dist) * r.speed;
+        } else {
+            // Reached base area, deal damage / mill around
+            r.tx = base.x + (Math.random()-0.5)*120;
+            r.ty = base.y + (Math.random()-0.5)*80;
+        }
+    });
+
+    // --- PARTICLES ---
+    entities.particles = entities.particles.filter(p => {
+        p.x += p.vx; p.y += p.vy;
+        p.vx *= 0.92; p.vy *= 0.92;
+        p.life--;
+        return p.life > 0;
+    });
+
+    // --- SPICE FIELD GLOW PULSE ---
+    SPICE_FIELDS.forEach(f => {
+        f.glow = (Math.sin(mapTick * 0.03 + f.x * 0.01) + 1) * 0.5;
+    });
+
+    if (entities.combatFlash > 0) entities.combatFlash--;
+}
+
+// =====================================================================
+// CANVAS RENDERER
+// =====================================================================
+function render() {
+    requestAnimationFrame(render);
+
+    // Resize canvas to match display size
+    const rect = canvas.parentElement.getBoundingClientRect();
+    if (canvas.width !== Math.floor(rect.width) || canvas.height !== Math.floor(rect.height)) {
+        canvas.width  = Math.floor(rect.width);
+        canvas.height = Math.floor(rect.height);
+    }
+    if (canvas.width === 0 || canvas.height === 0) return;
+
+    updateEntities(1);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    drawTerrain();
+    drawSpiceFields();
+    drawBuildings();
+    drawFremen();
+    drawHarvesters();
+    drawDefenders();
+    drawRaiders();
+    drawParticles();
+    if (entities.combatFlash > 0) drawCombatFlash();
+}
+
+function sx(wx) { return wx / W * canvas.width; }
+function sy(wy) { return wy / H * canvas.height; }
+function ss(s)  { return s  / W * canvas.width; }  // scale size
+
+function drawTerrain() {
+    // Base sand gradient
+    const grad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    grad.addColorStop(0,   '#1a0e03');
+    grad.addColorStop(0.3, '#200e04');
+    grad.addColorStop(0.6, '#17080200');
+    grad.addColorStop(1,   '#0d0600');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Dune ripples
+    duneLines.forEach(dl => {
+        ctx.beginPath();
+        ctx.strokeStyle = `rgba(200,140,50,${dl.alpha})`;
+        ctx.lineWidth = 1;
+        dl.pts.forEach((p, i) => {
+            if (i === 0) ctx.moveTo(sx(p.x), sy(p.y));
+            else ctx.lineTo(sx(p.x), sy(p.y));
+        });
+        ctx.stroke();
+    });
+
+    // Subtle vignette
+    const vign = ctx.createRadialGradient(canvas.width/2, canvas.height/2, canvas.width*0.3, canvas.width/2, canvas.height/2, canvas.width*0.8);
+    vign.addColorStop(0, 'rgba(0,0,0,0)');
+    vign.addColorStop(1, 'rgba(0,0,0,0.6)');
+    ctx.fillStyle = vign;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawSpiceFields() {
+    SPICE_FIELDS.forEach(f => {
+        const cx = sx(f.x), cy = sy(f.y);
+        const r = ss(f.r);
+
+        // Glow
+        const glowR = r * (1.8 + f.glow * 0.5);
+        const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, glowR);
+        grd.addColorStop(0, `rgba(255,140,0,${0.25 + f.glow * 0.15})`);
+        grd.addColorStop(0.5, `rgba(200,80,0,${0.1 + f.glow * 0.05})`);
+        grd.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = grd;
+        ctx.beginPath();
+        ctx.arc(cx, cy, glowR, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Field texture - dots
+        ctx.fillStyle = `rgba(255,160,20,${0.6 + f.glow * 0.2})`;
+        for (let i = 0; i < 12; i++) {
+            const angle = (i / 12) * Math.PI * 2;
+            const d = r * (0.3 + (i % 3) * 0.2);
+            ctx.beginPath();
+            ctx.arc(cx + Math.cos(angle)*d, cy + Math.sin(angle)*d*0.6, ss(3), 0, Math.PI*2);
+            ctx.fill();
+        }
+        ctx.beginPath();
+        ctx.arc(cx, cy, ss(5), 0, Math.PI*2);
+        ctx.fillStyle = `rgba(255,200,50,${0.8 + f.glow * 0.2})`;
+        ctx.fill();
+    });
+}
+
+function drawBuildings() {
+    const base = BUILDING_SLOTS.commandCenter;
+
+    // --- Command Center (always shown) ---
+    drawCommandCenter(sx(base.x), sy(base.y));
+
+    const b = id => game.buildings.find(b => b.id === id);
+
+    // --- Refineries ---
+    const refCount = Math.min(b('refinery').count, BUILDING_SLOTS.refinery.length);
+    for (let i = 0; i < refCount; i++) {
+        const slot = BUILDING_SLOTS.refinery[i];
+        drawRefinery(sx(slot.x), sy(slot.y));
+    }
+
+    // --- Silos ---
+    const siloB = b('silo');
+    const siloCount = Math.min(siloB.count, BUILDING_SLOTS.silo.length);
+    for (let i = 0; i < siloCount; i++) {
+        const slot = BUILDING_SLOTS.silo[i];
+        const fillFrac = Math.min(1, (game.spice % 1000) / 1000);
+        drawSilo(sx(slot.x), sy(slot.y), fillFrac);
+    }
+
+    // --- Barracks ---
+    const barCount = Math.min(b('barracks').count, BUILDING_SLOTS.barracks.length);
+    for (let i = 0; i < barCount; i++) {
+        const slot = BUILDING_SLOTS.barracks[i];
+        drawBarracks(sx(slot.x), sy(slot.y));
+    }
+
+    // --- Factory ---
+    const facCount = Math.min(b('factory').count, BUILDING_SLOTS.factory.length);
+    for (let i = 0; i < facCount; i++) {
+        const slot = BUILDING_SLOTS.factory[i];
+        drawFactory(sx(slot.x), sy(slot.y));
+    }
+}
+
+function drawCommandCenter(cx, cy) {
+    const s = ss(28);
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + s*0.9, s*1.1, s*0.25, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Base structure
+    ctx.fillStyle = '#4a3020';
+    ctx.strokeStyle = '#d35400';
+    ctx.lineWidth = ss(2);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - s);
+    ctx.lineTo(cx + s, cy - s*0.3);
+    ctx.lineTo(cx + s*0.7, cy + s*0.5);
+    ctx.lineTo(cx - s*0.7, cy + s*0.5);
+    ctx.lineTo(cx - s, cy - s*0.3);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // Top
+    ctx.fillStyle = '#5a3825';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - s);
+    ctx.lineTo(cx + s*0.5, cy - s*0.5);
+    ctx.lineTo(cx, cy - s*0.2);
+    ctx.lineTo(cx - s*0.5, cy - s*0.5);
+    ctx.closePath();
+    ctx.fill();
+    // Antenna
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = ss(1.5);
+    ctx.beginPath();
+    ctx.moveTo(cx, cy - s);
+    ctx.lineTo(cx, cy - s * 1.8);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy - s * 1.85, ss(3), 0, Math.PI*2);
+    ctx.fillStyle = `rgba(255,120,0,${0.7 + Math.sin(mapTick*0.1)*0.3})`;
+    ctx.fill();
+    // Windows
+    ctx.fillStyle = `rgba(135,206,235,0.6)`;
+    ctx.beginPath(); ctx.arc(cx, cy - s*0.1, ss(5), 0, Math.PI*2); ctx.fill();
+}
+
+function drawRefinery(cx, cy) {
+    const s = ss(16);
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath(); ctx.ellipse(cx, cy + s*0.9, s*0.9, s*0.2, 0, 0, Math.PI*2); ctx.fill();
+    // Body
+    ctx.fillStyle = '#3a2510';
+    ctx.strokeStyle = '#8a5030';
+    ctx.lineWidth = ss(1.5);
+    ctx.fillRect(cx - s*0.7, cy - s*0.8, s*1.4, s*1.6);
+    ctx.strokeRect(cx - s*0.7, cy - s*0.8, s*1.4, s*1.6);
+    // Pipes/chimneys
+    ctx.fillStyle = '#666';
+    ctx.fillRect(cx - s*0.5, cy - s*1.5, ss(5), s*0.8);
+    ctx.fillRect(cx + s*0.2, cy - s*1.3, ss(4), s*0.6);
+    // Smoke
+    for (let i = 0; i < 2; i++) {
+        const smokeY = cy - s*1.5 - (mapTick*0.5 + i*30) % 30;
+        const smokeA = 0.3 - ((mapTick*0.5 + i*30) % 30) / 100;
+        if (smokeA > 0) {
+            ctx.beginPath();
+            ctx.arc(cx - s*0.3 + i*s*0.5, smokeY, ss(3 + i*2), 0, Math.PI*2);
+            ctx.fillStyle = `rgba(100,80,60,${smokeA})`;
+            ctx.fill();
+        }
+    }
+    // Window
+    ctx.fillStyle = 'rgba(255,160,0,0.5)';
+    ctx.fillRect(cx - ss(3), cy - ss(3), ss(6), ss(5));
+}
+
+function drawSilo(cx, cy, fillFrac) {
+    const s = ss(14);
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.ellipse(cx, cy + s*1.1, s*0.8, s*0.2, 0, 0, Math.PI*2); ctx.fill();
+    // Cylinder body
+    ctx.fillStyle = '#2d1d0c';
+    ctx.strokeStyle = '#7a4a20';
+    ctx.lineWidth = ss(1.5);
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - s*0.7, s*0.65, s*0.2, 0, 0, Math.PI*2);
+    ctx.fill(); ctx.stroke();
+    ctx.fillRect(cx - s*0.65, cy - s*0.7, s*1.3, s*1.8);
+    ctx.strokeRect(cx - s*0.65, cy - s*0.7, s*1.3, s*1.8);
+    ctx.beginPath();
+    ctx.ellipse(cx, cy + s*1.1, s*0.65, s*0.2, 0, 0, Math.PI*2);
+    ctx.fillStyle = '#3d2510'; ctx.fill();
+    ctx.strokeStyle = '#7a4a20'; ctx.stroke();
+    // Fill indicator
+    const fillH = s * 1.5 * fillFrac;
+    ctx.fillStyle = `rgba(255,140,0,${0.4 + fillFrac*0.4})`;
+    ctx.fillRect(cx - s*0.6, cy + s*1.0 - fillH, s*1.2, fillH);
+    // Top dome
+    ctx.fillStyle = '#555';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy - s*0.85, s*0.65, s*0.25, 0, 0, Math.PI*2);
+    ctx.fill();
+    // Fill % text
+    if (ss(1) > 0.5) {
+        ctx.fillStyle = `rgba(255,200,100,${0.7})`;
+        ctx.font = `bold ${ss(7)}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`${Math.floor(fillFrac*100)}%`, cx, cy + ss(5));
+    }
+}
+
+function drawBarracks(cx, cy) {
+    const s = ss(14);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.ellipse(cx, cy + s*0.5, s*0.85, s*0.2, 0, 0, Math.PI*2); ctx.fill();
+    // Low building
+    ctx.fillStyle = '#2a1a0a';
+    ctx.strokeStyle = '#c0392b';
+    ctx.lineWidth = ss(1.5);
+    ctx.fillRect(cx - s, cy - s*0.4, s*2, s*0.9);
+    ctx.strokeRect(cx - s, cy - s*0.4, s*2, s*0.9);
+    // Tent/roof
+    ctx.fillStyle = '#3a2010';
+    ctx.beginPath();
+    ctx.moveTo(cx - s*1.1, cy - s*0.4);
+    ctx.lineTo(cx, cy - s*1.0);
+    ctx.lineTo(cx + s*1.1, cy - s*0.4);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // Door
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(cx - ss(4), cy - ss(5), ss(8), ss(10));
+    // Flag
+    ctx.strokeStyle = '#888'; ctx.lineWidth = ss(1);
+    ctx.beginPath(); ctx.moveTo(cx, cy - s); ctx.lineTo(cx, cy - s*1.6); ctx.stroke();
+    ctx.fillStyle = '#c0392b';
+    ctx.fillRect(cx, cy - s*1.6, ss(8), ss(5));
+}
+
+function drawFactory(cx, cy) {
+    const s = ss(18);
+    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.beginPath(); ctx.ellipse(cx, cy + s*0.8, s*1.1, s*0.2, 0, 0, Math.PI*2); ctx.fill();
+    // Main structure
+    ctx.fillStyle = '#252010';
+    ctx.strokeStyle = '#a0a030';
+    ctx.lineWidth = ss(1.5);
+    ctx.fillRect(cx - s, cy - s*0.5, s*2, s*1.3);
+    ctx.strokeRect(cx - s, cy - s*0.5, s*2, s*1.3);
+    // Roof detail
+    ctx.fillStyle = '#303015';
+    ctx.fillRect(cx - s*0.9, cy - s*0.8, s*1.8, s*0.4);
+    ctx.strokeRect(cx - s*0.9, cy - s*0.8, s*1.8, s*0.4);
+    // Chimneys
+    [cx - s*0.5, cx + s*0.3].forEach(px => {
+        ctx.fillStyle = '#555'; ctx.fillRect(px - ss(3), cy - s*1.4, ss(6), s*0.7);
+        const smokeAlpha = 0.2 + Math.sin(mapTick*0.08 + px)*0.1;
+        ctx.beginPath(); ctx.arc(px, cy - s*1.4 - (mapTick*0.3)%20, ss(4), 0, Math.PI*2);
+        ctx.fillStyle = `rgba(120,100,60,${smokeAlpha})`; ctx.fill();
+    });
+    // Gear emblem
+    ctx.strokeStyle = '#a0a030'; ctx.lineWidth = ss(1);
+    ctx.beginPath(); ctx.arc(cx, cy, ss(7), 0, Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, ss(3), 0, Math.PI*2); ctx.stroke();
+}
+
+function drawFremen() {
+    const fremenBuilding = game.buildings.find(b => b.id === 'fremen');
+    const visCount = Math.min(entities.fremen.length, fremenBuilding ? fremenBuilding.count * 3 : 0);
+    for (let i = 0; i < visCount; i++) {
+        const f = entities.fremen[i];
+        const cx = sx(f.x), cy = sy(f.y);
+        const s = ss(6);
+        // Hooded figure
+        ctx.fillStyle = 'rgba(100,60,30,0.9)';
+        ctx.beginPath(); ctx.arc(cx, cy - s, s*0.5, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = 'rgba(80,50,20,0.8)';
+        ctx.beginPath();
+        ctx.moveTo(cx - s*0.6, cy);
+        ctx.lineTo(cx + s*0.6, cy);
+        ctx.lineTo(cx + s*0.4, cy + s);
+        ctx.lineTo(cx - s*0.4, cy + s);
+        ctx.closePath(); ctx.fill();
+        // Blue eyes
+        ctx.fillStyle = 'rgba(0,150,255,0.9)';
+        ctx.beginPath(); ctx.arc(cx, cy - s*1.05, s*0.2, 0, Math.PI*2); ctx.fill();
+    }
+}
+
+function drawHarvesters() {
+    entities.harvesters.forEach(h => {
+        const cx = sx(h.x), cy = sy(h.y);
+        const s  = ss(18);
+        const angle = h.angle;
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(angle);
+
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath(); ctx.ellipse(0, s*0.35, s*0.9, s*0.2, 0, 0, Math.PI*2); ctx.fill();
+
+        // Load color
+        const loadFrac = h.load / h.maxLoad;
+        const bodyColor = h.state === HS.MINING ? '#c05000' : (loadFrac > 0.7 ? '#ff8800' : '#d35400');
+
+        // Body
+        ctx.fillStyle = bodyColor;
+        ctx.strokeStyle = '#1a0a00';
+        ctx.lineWidth = ss(1);
+        ctx.fillRect(-s*0.7, -s*0.3, s*1.4, s*0.6);
+        ctx.strokeRect(-s*0.7, -s*0.3, s*1.4, s*0.6);
+        // Cab
+        ctx.fillStyle = '#555';
+        ctx.fillRect(-s*0.2, -s*0.6, s*0.5, s*0.35);
+        ctx.fillStyle = 'rgba(135,206,235,0.5)';
+        ctx.fillRect(-s*0.15, -s*0.55, s*0.4, s*0.25);
+        // Wheels
+        ctx.fillStyle = '#222';
+        [-s*0.5, -s*0.1, s*0.3].forEach(wx => {
+            ctx.beginPath(); ctx.arc(wx, s*0.3, ss(4), 0, Math.PI*2); ctx.fill();
+        });
+        // Load indicator bar
+        if (h.load > 0) {
+            ctx.fillStyle = '#333';
+            ctx.fillRect(-s*0.6, -s*0.45, s*1.2, ss(4));
+            ctx.fillStyle = `rgba(255,${Math.floor(200 - loadFrac*150)},0,0.9)`;
+            ctx.fillRect(-s*0.6, -s*0.45, s*1.2 * loadFrac, ss(4));
+        }
+        // Mining drill animation
+        if (h.state === HS.MINING) {
+            ctx.strokeStyle = '#ffaa00';
+            ctx.lineWidth = ss(2);
+            const drillLen = ss(10 + Math.sin(mapTick*0.2)*4);
+            ctx.beginPath();
+            ctx.moveTo(s*0.7, 0);
+            ctx.lineTo(s*0.7 + drillLen, 0);
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        // State indicator dot
+        if (h.state === HS.TO_BASE) {
+            ctx.beginPath();
+            ctx.arc(cx, cy - ss(18), ss(3), 0, Math.PI*2);
+            ctx.fillStyle = 'rgba(255,200,0,0.8)';
+            ctx.fill();
+        }
+    });
+}
+
+function drawDefenders() {
+    entities.defenders.forEach(d => {
+        const cx = sx(d.x), cy = sy(d.y);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(d.angle);
+
+        if (d.type === 'infantry') {
+            // Small soldier
+            ctx.fillStyle = '#2ecc71';
+            ctx.beginPath(); ctx.arc(0, -ss(5), ss(3.5), 0, Math.PI*2); ctx.fill(); // head
+            ctx.fillRect(-ss(2.5), -ss(3), ss(5), ss(7)); // body
+            // Rifle
+            ctx.strokeStyle = '#888'; ctx.lineWidth = ss(1);
+            ctx.beginPath(); ctx.moveTo(ss(2), -ss(2)); ctx.lineTo(ss(10), -ss(2)); ctx.stroke();
+        } else {
+            // Tank
+            ctx.fillStyle = '#27ae60';
+            ctx.strokeStyle = '#1a8045';
+            ctx.lineWidth = ss(1);
+            ctx.fillRect(-ss(10), -ss(6), ss(20), ss(12)); // hull
+            ctx.strokeRect(-ss(10), -ss(6), ss(20), ss(12));
+            ctx.fillStyle = '#2ecc71';
+            ctx.fillRect(-ss(6), -ss(4), ss(12), ss(8)); // turret
+            // Barrel
+            ctx.strokeStyle = '#1a8045'; ctx.lineWidth = ss(2);
+            ctx.beginPath(); ctx.moveTo(ss(6), 0); ctx.lineTo(ss(16), 0); ctx.stroke();
+            // Treads
+            ctx.fillStyle = '#1a5030';
+            ctx.fillRect(-ss(12), -ss(8), ss(24), ss(3));
+            ctx.fillRect(-ss(12),  ss(5), ss(24), ss(3));
+        }
+
+        // HP bar
+        if (d.hp < d.maxHp) {
+            ctx.fillStyle = '#500';
+            ctx.fillRect(-ss(10), -ss(12), ss(20), ss(3));
+            ctx.fillStyle = '#0f0';
+            ctx.fillRect(-ss(10), -ss(12), ss(20)*(d.hp/d.maxHp), ss(3));
+        }
+
+        ctx.restore();
+    });
+}
+
+function drawRaiders() {
+    entities.raiders.forEach(r => {
+        const cx = sx(r.x), cy = sy(r.y);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(r.angle + Math.PI/2);
+
+        const s = ss(9);
+        // Raider triangle shape
+        ctx.fillStyle = '#8e44ad';
+        ctx.strokeStyle = '#ff00ff';
+        ctx.lineWidth = ss(1);
+        ctx.beginPath();
+        ctx.moveTo(0, -s);
+        ctx.lineTo(-s*0.7, s*0.6);
+        ctx.lineTo(s*0.7, s*0.6);
+        ctx.closePath();
+        ctx.fill(); ctx.stroke();
+        // Eye glow
+        ctx.fillStyle = `rgba(255,0,200,${0.7 + Math.sin(mapTick*0.15+r.id)*0.3})`;
+        ctx.beginPath(); ctx.arc(0, -s*0.3, ss(2.5), 0, Math.PI*2); ctx.fill();
+
+        // HP bar
+        if (r.hp < r.maxHp) {
+            ctx.rotate(-(r.angle + Math.PI/2)); // un-rotate for bar
+            ctx.fillStyle = '#500';
+            ctx.fillRect(-ss(8), -s*1.5, ss(16), ss(3));
+            ctx.fillStyle = '#a020a0';
+            ctx.fillRect(-ss(8), -s*1.5, ss(16)*(r.hp/r.maxHp), ss(3));
+        }
+
+        ctx.restore();
+    });
+}
+
+function drawParticles() {
+    entities.particles.forEach(p => {
+        const alpha = p.life / p.maxLife;
+        ctx.beginPath();
+        ctx.arc(sx(p.x), sy(p.y), ss(p.r) * alpha, 0, Math.PI*2);
+        ctx.fillStyle = p.color.replace(')', `,${alpha})`).replace('rgb', 'rgba');
+        ctx.fill();
+    });
+}
+
+function drawCombatFlash() {
+    const alpha = (entities.combatFlash / 30) * 0.3;
+    ctx.fillStyle = `rgba(200,0,0,${alpha})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// =====================================================================
+// GAME LOGIC
+// =====================================================================
+let tickCounter = 0;
+let lastDefenderSpawn = 0;
+
+function gameLoop() {
+    tickCounter++;
+    const sps = calculateSpicePerSecond();
+    game.spice += sps / 10;
+    game.clickPower = 1 + Math.floor(sps * 0.05);
+
+    // Unit Production
+    if (tickCounter % 100 === 0) produceUnits('barracks', 2, 'infantry');
+    if (tickCounter % 150 === 0) produceUnits('factory', 15, 'tank');
+
+    // Sync visual defenders with military power
+    const targetDefenders = Math.min(20, Math.floor(game.militaryPower / 5));
+    if (entities.defenders.length < targetDefenders && tickCounter % 30 === 0) {
+        const hasBarracks = game.buildings.find(b=>b.id==='barracks').count > 0;
+        const hasFactory  = game.buildings.find(b=>b.id==='factory').count > 0;
+        if (hasBarracks || hasFactory) {
+            const type = (hasFactory && (!hasBarracks || Math.random() < 0.3)) ? 'tank' : 'infantry';
+            spawnDefender(type);
+        }
+    }
+
+    // Combat Timer
+    if (tickCounter % 10 === 0) {
+        game.attackTimer -= 1;
+        updateThreatBar();
+
+        // Spawn visual raiders as attack approaches
+        if (game.attackTimer <= 5 && entities.raiders.length === 0) {
+            const count = Math.max(1, Math.floor(game.enemyPower / 10));
+            spawnRaiderWave(count);
+        }
+
+        if (game.attackTimer <= 0) {
+            resolveCombat();
+            game.attackTimer = game.attackMaxTime;
+            // Clear raiders after combat
+            setTimeout(() => {
+                entities.raiders = [];
+            }, 3000);
+        }
+    }
+
+    // Fremen sync
+    const fremenBuilding = game.buildings.find(b => b.id === 'fremen');
+    const targetFremen = fremenBuilding.count * 3;
+    if (entities.fremen.length < targetFremen) spawnFremen();
+
+    updateUI();
+    checkAffordability();
+}
+
+function buyBuilding(index) {
+    const b = game.buildings[index];
+    if (game.spice >= b.cost) {
+        game.spice -= b.cost;
+        b.count++;
+        b.cost = Math.floor(b.baseCost * Math.pow(1.15, b.count));
+        if (b.id === 'harvester') {
+            const cap = Math.min(b.count, 12);
+            if (entities.harvesters.length < cap) spawnHarvester();
+        }
+        renderUpgrades();
+        updateUI();
+    }
+}
+
+function calculateSpicePerSecond() {
+    return game.buildings.filter(b => b.type === 'econ').reduce((s, b) => s + b.count * b.prod, 0);
+}
+
+function produceUnits(buildingId, powerValue, unitType) {
+    const building = game.buildings.find(b => b.id === buildingId);
+    if (building && building.count > 0) {
+        game.militaryPower += building.count * powerValue;
+    }
+}
+
+function updateThreatBar() {
+    const pct = ((game.attackMaxTime - game.attackTimer) / game.attackMaxTime) * 100;
+    document.getElementById('threat-bar').style.width = `${pct}%`;
+}
+
+function resolveCombat() {
+    entities.combatFlash = 30;
+    emitParticles(BUILDING_SLOTS.commandCenter.x, BUILDING_SLOTS.commandCenter.y, 'rgb(255,100,0)', 20, 5);
+
+    if (game.militaryPower >= game.enemyPower) {
+        const loot = Math.floor(game.enemyPower * 5);
+        game.spice += loot;
+        logCombat(`⚔️ Victory! Defeated Sand Raiders, looted ${loot.toLocaleString()} mg!`);
+        game.enemyPower = Math.floor(game.enemyPower * 1.4);
+    } else {
+        const lost = Math.floor(game.spice * 0.2);
+        game.spice = Math.max(0, game.spice - lost);
+        logCombat(`💀 Defeat! Raiders stole ${lost.toLocaleString()} mg of spice!`);
+        // Kill some defenders
+        const killCount = Math.min(entities.defenders.length, Math.floor(Math.random() * 3) + 1);
+        for (let i = 0; i < killCount; i++) {
+            if (entities.defenders.length > 0) {
+                const d = entities.defenders.splice(Math.floor(Math.random() * entities.defenders.length), 1)[0];
+                emitParticles(d.x, d.y, 'rgb(200,0,0)', 8, 3);
+            }
+        }
+    }
+}
+
+function logCombat(msg) {
+    const el = document.getElementById('combat-log');
+    el.innerText = msg;
+    el.style.color = msg.includes('Victory') ? '#2ecc71' : '#e74c3c';
+    setTimeout(() => { el.style.color = '#ccc'; }, 4000);
+}
+
+// --- Canvas Click = Harvest ---
+canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const [wx, wy] = fromCanvas(cx, cy);
+
+    // Check if clicked on spice field
+    let hitField = false;
+    SPICE_FIELDS.forEach(f => {
+        if (Math.hypot(wx - f.x, wy - f.y) < f.r * 1.5) hitField = true;
+    });
+
+    const power = hitField ? game.clickPower * 3 : game.clickPower;
+    game.spice += power;
+    if (navigator.vibrate) navigator.vibrate(15);
+
+    // Floating text
+    const floater = document.createElement('div');
+    floater.className = 'floating-text';
+    floater.innerText = `+${power}`;
+    floater.style.left = `${e.clientX}px`;
+    floater.style.top  = `${e.clientY}px`;
+    document.body.appendChild(floater);
+    setTimeout(() => floater.remove(), 1000);
+
+    // Spice particle
+    emitParticles(wx, wy, 'rgb(255,140,0)', 5, 3);
+
+    updateUI();
+});
+canvas.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    canvas.dispatchEvent(new MouseEvent('click', { clientX: t.clientX, clientY: t.clientY }));
+}, { passive: false });
+
+// --- UI ---
+function updateUI() {
+    document.getElementById('spice-count').innerText = Math.floor(game.spice).toLocaleString();
+    document.getElementById('spice-rate').innerText   = calculateSpicePerSecond().toLocaleString();
+    document.getElementById('mil-power').innerText    = game.militaryPower.toLocaleString();
+    document.getElementById('enemy-power').innerText  = game.enemyPower.toLocaleString();
+}
+
+function switchTab(tab) {
+    game.activeTab = tab;
+    document.getElementById('tab-econ').classList.toggle('active', tab === 'econ');
+    document.getElementById('tab-mil').classList.toggle('active', tab === 'mil');
+    renderUpgrades();
+}
+
+function renderUpgrades() {
+    const container = document.getElementById('upgrades-container');
+    container.innerHTML = '';
+    game.buildings.forEach((b, index) => {
+        if (b.type !== game.activeTab) return;
+        const card = document.createElement('div');
+        card.className = `upgrade-card ${b.type === 'mil' ? 'mil-card' : ''}`;
+        card.id = `upgrade-${index}`;
+        card.onclick = () => buyBuilding(index);
+        card.innerHTML = `
+            <div style="display:flex;align-items:center;">
+                <span style="font-size:2rem;margin-right:12px;">${b.icon}</span>
+                <div class="upgrade-info">
+                    <h3>${b.name}</h3>
+                    <p>${b.desc}</p>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;">
+                <div class="upgrade-cost">${b.cost.toLocaleString()}</div>
+                <div class="upgrade-count">${b.count}</div>
+            </div>`;
+        container.appendChild(card);
+    });
+    checkAffordability();
+}
+
+function checkAffordability() {
+    game.buildings.forEach((b, index) => {
+        if (b.type !== game.activeTab) return;
+        const card = document.getElementById(`upgrade-${index}`);
+        if (card) card.classList.toggle('disabled', game.spice < b.cost);
+    });
+}
+
+// --- Save / Load ---
+function saveGame() {
+    localStorage.setItem('duneIdleV3', JSON.stringify({
+        spice: game.spice, militaryPower: game.militaryPower,
+        enemyPower: game.enemyPower, attackTimer: game.attackTimer,
+        buildings: game.buildings.map(b => ({ count: b.count, cost: b.cost })),
+    }));
+}
+
+function loadGame() {
+    const saved = localStorage.getItem('duneIdleV3');
+    if (saved) {
+        try {
+            const p = JSON.parse(saved);
+            game.spice = p.spice || 0;
+            game.militaryPower = p.militaryPower || 0;
+            game.enemyPower = p.enemyPower || 10;
+            game.attackTimer = p.attackTimer || 30;
+            if (p.buildings) {
+                game.buildings.forEach((b, i) => {
+                    if (p.buildings[i]) { b.count = p.buildings[i].count; b.cost = p.buildings[i].cost; }
+                });
+            }
+        } catch(e) {}
+    }
+}
+
+function wipeSave() {
+    if (confirm('Abandon Arrakis? All progress lost!')) {
+        localStorage.removeItem('duneIdleV3');
+        location.reload();
+    }
+}
+
+// --- INIT ---
+function init() {
+    loadGame();
+    renderUpgrades();
+
+    // Restore visual harvesters from saved count
+    const harvB = game.buildings.find(b => b.id === 'harvester');
+    const visH = Math.min(harvB.count, 12);
+    for (let i = 0; i < visH; i++) spawnHarvester();
+
+    // Restore fremen
+    const fremB = game.buildings.find(b => b.id === 'fremen');
+    for (let i = 0; i < Math.min(fremB.count * 3, 30); i++) {
+        entities.fremen.push({
+            x: 200 + Math.random() * 600, y: 200 + Math.random() * 300,
+            angle: Math.random() * Math.PI * 2,
+            timer: Math.random() * 200, speed: 0.4 + Math.random() * 0.4,
+        });
+    }
+
+    // Restore defenders
+    const milPow = game.militaryPower;
+    const defCount = Math.min(15, Math.floor(milPow / 10));
+    for (let i = 0; i < defCount; i++) {
+        spawnDefender(Math.random() < 0.3 ? 'tank' : 'infantry');
+    }
+
+    setInterval(gameLoop, 100);
+    setInterval(saveGame, 5000);
+    requestAnimationFrame(render);
+}
+
+init();
+</script>
+</body>
+</html>
