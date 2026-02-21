@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>OSIRIS: System Awakening</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@300;500;700&display=swap');
+
+        :root {
+            --bg: #050508;
+            --panel: rgba(12, 15, 25, 0.8);
+            --border: rgba(0, 240, 255, 0.15);
+            --cyan: #00f0ff;
+            --alert: #ff003c;
+            --gold: #ffd700;
+            --text: #e2e8f0;
+            --core-color: #00f0ff;
+            --glow: 0 0 20px var(--core-color);
+        }
+
+        /* Verhindert Pull-to-Refresh und Scrollen auf Touchscreens */
+        html, body { 
+            margin: 0; padding: 0; width: 100%; height: 100%; 
+            overflow: hidden; background-color: var(--bg);
+            font-family: 'Rajdhani', sans-serif; color: var(--text);
+            touch-action: none; user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* --- HINTERGRUND & EFFEKTE --- */
+        #space {
+            position: fixed; width: 100vw; height: 100vh; z-index: 0;
+            background: radial-gradient(circle at 50% 50%, #111a22 0%, #000 100%);
+        }
+        .star { position: absolute; background: #fff; border-radius: 50%; opacity: 0.5; }
+
+        /* --- LAYOUT GRID (Tesla Optimized: 16:9 Landscape) --- */
+        #ui-layer {
+            position: relative; z-index: 10;
+            display: grid;
+            grid-template-rows: 90px 1fr;
+            grid-template-columns: 350px 1fr 350px;
+            width: 100vw; height: 100vh;
+            pointer-events: none; /* Lässt Klicks zum Space-Layer durch, außer auf Panels */
+        }
+
+        /* --- TOP HUD (Ressourcen) --- */
+        #hud {
+            grid-column: 1 / 4;
+            display: flex; justify-content: space-evenly; align-items: center;
+            background: linear-gradient(to bottom, rgba(0,0,0,0.9), transparent);
+            border-bottom: 1px solid var(--border);
+            backdrop-filter: blur(10px);
+            pointer-events: auto;
+        }
+        .stat-box {
+            display: flex; flex-direction: column; align-items: center;
+            min-width: 120px;
+        }
+        .stat-label { font-size: 0.75rem; letter-spacing: 2px; color: #8892b0; text-transform: uppercase; }
+        .stat-val { font-family: 'Orbitron', sans-serif; font-size: 1.8rem; font-weight: 700; text-shadow: 0 0 10px rgba(255,255,255,0.2); }
+        .val-e { color: var(--cyan); }
+        .val-m { color: #b000ff; }
+        .val-d { color: var(--gold); }
+
+        /* --- PANELS --- */
+        .panel {
+            background: var(--panel); backdrop-filter: blur(15px);
+            border-right: 1px solid var(--border); border-left: 1px solid var(--border);
+            display: flex; flex-direction: column; overflow-y: auto;
+            pointer-events: auto; scrollbar-width: none;
+        }
+        .panel::-webkit-scrollbar { display: none; }
+        .panel-header {
+            font-family: 'Orbitron', sans-serif; font-size: 1.2rem; font-weight: 900;
+            text-align: center; padding: 15px; border-bottom: 1px solid var(--border);
+            color: var(--text); letter-spacing: 3px; background: rgba(0,0,0,0.5);
+            position: sticky; top: 0; z-index: 5;
+        }
+
+        /* --- UPGRADES --- */
+        #upgrades-container { padding: 15px; display: flex; flex-direction: column; gap: 12px; }
+        .upgrade-btn {
+            background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px; padding: 15px; cursor: pointer; text-align: left;
+            transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            position: relative; overflow: hidden;
+        }
+        .upgrade-btn:active { transform: scale(0.97); }
+        .upgrade-btn.disabled { opacity: 0.4; filter: grayscale(1); pointer-events: none; }
+        .upgrade-btn.affordable { border-color: var(--cyan); background: rgba(0, 240, 255, 0.05); }
+        .upgrade-title { font-family: 'Orbitron', sans-serif; font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 5px; }
+        .upgrade-desc { font-size: 0.85rem; color: #a0aec0; margin-bottom: 10px; line-height: 1.3; }
+        .upgrade-cost { font-family: 'Orbitron', sans-serif; font-size: 0.85rem; display: flex; gap: 10px; }
+        .lvl-badge { position: absolute; top: 15px; right: 15px; font-family: 'Orbitron'; font-weight: 900; color: rgba(255,255,255,0.2); font-size: 1.5rem; }
+
+        /* --- LOG & STORY --- */
+        #comms-container { padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        .log-entry {
+            background: rgba(0,0,0,0.4); border-left: 3px solid #555;
+            padding: 10px 15px; font-size: 0.9rem; line-height: 1.4;
+            animation: fadeIn 0.4s ease-out; border-radius: 0 4px 4px 0;
+        }
+        .log-sys { border-color: var(--cyan); color: #a0aec0; }
+        .log-warn { border-color: var(--alert); color: #ff99a8; font-weight: 500; }
+        .log-story { border-color: var(--gold); color: #fff; font-style: italic; background: rgba(255, 215, 0, 0.05); }
+        @keyframes fadeIn { from { opacity: 0; transform: translateX(10px); } to { opacity: 1; transform: translateX(0); } }
+
+        /* --- DER KERN (Center) --- */
+        #center-stage {
+            position: relative; pointer-events: auto;
+            display: flex; justify-content: center; align-items: center;
+        }
+        #reactor-wrapper {
+            position: relative; width: 400px; height: 400px;
+            display: flex; justify-content: center; align-items: center;
+        }
+        
+        /* Hitze-Ring */
+        #heat-ring-bg { position: absolute; width: 220px; height: 220px; border-radius: 50%; border: 4px solid rgba(255,255,255,0.05); z-index: 1;}
+        #heat-ring-fill {
+            position: absolute; width: 220px; height: 220px; border-radius: 50%;
+            border: 4px solid var(--alert); z-index: 2;
+            clip-path: polygon(50% 50%, 50% 0%, 50% 0%, 50% 0%, 50% 0%, 50% 0%, 50% 0%);
+            transition: clip-path 0.1s linear, filter 0.2s;
+        }
+        
+        #core {
+            width: 80px; height: 80px; border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #fff, var(--core-color), #001122);
+            box-shadow: var(--glow); z-index: 10; cursor: pointer;
+            transition: transform 0.05s, box-shadow 0.3s, background 0.5s;
+        }
+        #core:active { transform: scale(0.85); }
+        
+        /* Visuelle Upgrades des Kerns */
+        .orbit { position: absolute; border-radius: 50%; border: 1px dashed rgba(255,255,255,0.1); z-index: 5; pointer-events: none; opacity: 0; transition: opacity 1s; }
+        .orbit::before { content: ''; position: absolute; width: 6px; height: 6px; background: var(--core-color); border-radius: 50%; top: -3px; left: 50%; box-shadow: 0 0 10px var(--core-color); }
+        #orbit-1 { width: 140px; height: 140px; animation: spin 4s linear infinite; }
+        #orbit-2 { width: 300px; height: 300px; animation: spin 12s linear infinite reverse; }
+        #orbit-3 { width: 450px; height: 450px; border-style: solid; border-color: rgba(255,215,0,0.05); animation: spin 25s linear infinite; }
+        
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        /* --- DRAGGABLE ANOMALIEN --- */
+        .anomaly {
+            position: absolute; width: 50px; height: 50px;
+            background: radial-gradient(circle, #b000ff, transparent 70%);
+            border-radius: 50%; z-index: 20; touch-action: none;
+            filter: blur(1px); box-shadow: 0 0 15px rgba(176,0,255,0.5);
+            animation: float 6s ease-in-out infinite; cursor: grab;
+        }
+        .anomaly:active { cursor: grabbing; transform: scale(1.2); }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
+
+        /* --- MODAL (Entscheidungen) --- */
+        #modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0,0,0,0.85); backdrop-filter: blur(5px);
+            z-index: 1000; display: none; justify-content: center; align-items: center;
+        }
+        #modal {
+            background: #0a0c12; border: 1px solid var(--border); border-top: 4px solid var(--gold);
+            width: 600px; max-width: 90%; padding: 40px; border-radius: 8px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5); text-align: center;
+        }
+        #modal-title { font-family: 'Orbitron'; font-size: 2rem; color: var(--gold); margin-top: 0; }
+        #modal-text { font-size: 1.1rem; line-height: 1.6; color: #cbd5e1; margin-bottom: 30px; }
+        .choice-btn {
+            display: block; width: 100%; padding: 15px; margin-bottom: 15px;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.2);
+            color: #fff; font-family: 'Rajdhani'; font-size: 1.1rem; font-weight: 700;
+            border-radius: 4px; cursor: pointer; transition: all 0.2s;
+        }
+        .choice-btn:hover { background: var(--text); color: #000; transform: scale(1.02); }
+        .choice-btn.red:hover { background: var(--alert); color: #fff; border-color: var(--alert); }
+        .choice-btn.blue:hover { background: var(--cyan); color: #000; border-color: var(--cyan); }
+
+        /* Meltdown Overlay */
+        #glitch-overlay {
+            position: fixed; top:0; left:0; width:100%; height:100%;
+            background: rgba(255,0,60,0.1); z-index: 900; pointer-events: none;
+            display: none; mix-blend-mode: overlay;
+        }
+    </style>
+</head>
+<body>
+
+<div id="space"></div>
+
+<div id="ui-layer">
+    <div id="hud">
+        <div class="stat-box">
+            <span class="stat-label">System-Hitze</span>
+            <span class="stat-val" id="val-heat" style="color: #fff;">0%</span>
+        </div>
+        <div class="stat-box">
+            <span class="stat-label">Energie (E)</span>
+            <span class="stat-val val-e" id="val-e">0</span>
+        </div>
+        <div class="stat-box">
+            <span class="stat-label">Materie (M)</span>
+            <span class="stat-val val-m" id="val-m">0</span>
+        </div>
+        <div class="stat-box">
+            <span class="stat-label">Daten (D)</span>
+            <span class="stat-val val-d" id="val-d">0</span>
+        </div>
+        <div class="stat-box">
+            <span class="stat-label">Status</span>
+            <span class="stat-val" id="val-status" style="font-size: 1rem; color: var(--cyan);">ONLINE</span>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">KONSTRUKTION</div>
+        <div id="upgrades-container">
+            </div>
+    </div>
+
+    <div id="center-stage">
+        <div id="reactor-wrapper">
+            <div id="heat-ring-bg"></div>
+            <div id="heat-ring-fill"></div>
+            <div id="orbit-1" class="orbit"></div>
+            <div id="orbit-2" class="orbit"></div>
+            <div id="orbit-3" class="orbit"></div>
+            <div id="core"></div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <div class="panel-header">UPLINK LOG</div>
+        <div id="comms-container">
+            </div>
+    </div>
+</div>
+
+<div id="modal-overlay">
+    <div id="modal">
+        <h2 id="modal-title">SIGNAL</h2>
+        <p id="modal-text">Text</p>
+        <div id="modal-choices"></div>
+    </div>
+</div>
+
+<div id="glitch-overlay"></div>
+
+<script>
+    /* =========================================
+       SYSTEM STATE & CONFIG
+       ========================================= */
+    const state = {
+        res: { e: 0, m: 0, d: 0 },
+        rates: { e: 0, m: 0, d: 0 },
+        clickPwr: 1,
+        heat: 0,
+        isMeltdown: false,
+        alignment: 0, // >0 Empathie (Blau), <0 Logik/Rogue (Rot)
+        storyStep: 0,
+        totalClicks: 0
+    };
+
+    const config = {
+        maxHeat: 100,
+        heatPerClick: 3,
+        coolingRate: 1.5, // pro Sekunde
+        overdriveThreshold: 80 // Ab hier 3x Energie
+    };
+
+    // Upgrades Definition
+    const upgrades = [
+        { id: 'u_click', name: 'Synaptischer Verstärker', desc: 'Erhöht Energie pro Tippen.', cost: {e: 15}, multi: 1.5, lvl: 0, max: 50, effect: () => { state.clickPwr += 1; config.heatPerClick *= 0.95; } },
+        { id: 'u_cool', name: 'Kühlrippen-Expansion', desc: 'Erhöht die passive Kühlrate.', cost: {e: 50, m: 5}, multi: 1.8, lvl: 0, max: 20, effect: () => { config.coolingRate += 1; } },
+        { id: 'u_autoE', name: 'Dyson-Kollektor', desc: 'Generiert passiv Energie.', cost: {e: 100, m: 20}, multi: 1.6, lvl: 0, max: -1, effect: () => { state.rates.e += 2; checkVisualEvolution(); } },
+        { id: 'u_grav', name: 'Gravitations-Netz', desc: 'Zieht Anomalien (Materie) automatisch langsam an.', cost: {e: 500, d: 5}, multi: 2, lvl: 0, max: 5, effect: () => { startAutoGravity(); } },
+        { id: 'u_data', name: 'Quanten-Dekompiler', desc: 'Generiert permanent Daten (D).', cost: {e: 1000, m: 300}, multi: 2.5, lvl: 0, max: -1, effect: () => { state.rates.d += 1; checkVisualEvolution(); } }
+    ];
+
+    const DOM = {
+        e: document.getElementById('val-e'), m: document.getElementById('val-m'), d: document.getElementById('val-d'),
+        heat: document.getElementById('val-heat'), status: document.getElementById('val-status'),
+        core: document.getElementById('core'), heatFill: document.getElementById('heat-ring-fill'),
+        stage: document.getElementById('center-stage'), upgCont: document.getElementById('upgrades-container'),
+        logCont: document.getElementById('comms-container'),
+        orbits: [document.getElementById('orbit-1'), document.getElementById('orbit-2'), document.getElementById('orbit-3')]
+    };
+
+    /* =========================================
+       INITIALISIERUNG & RENDER LOOP
+       ========================================= */
+    function init() {
+        createStars();
+        renderUpgrades();
+        addLog("O.S.I.R.I.S. Kern hochgefahren. Gedächtnisbänke leer.", "sys");
+        addLog("Tippe auf den Kern, um initiale Energie zu erzeugen.", "sys");
+        
+        // Core Click Event (Touch Support)
+        DOM.core.addEventListener('pointerdown', handleCoreClick);
+        
+        // Game Loops
+        setInterval(logicTick, 1000); // 1 Sekunde Tick für passive Raten
+        requestAnimationFrame(renderLoop); // 60 FPS für Hitze & UI
+        
+        // Anomaly Spawner
+        setInterval(spawnAnomaly, 4000);
+    }
+
+    function createStars() {
+        const space = document.getElementById('space');
+        for(let i=0; i<100; i++) {
+            let star = document.createElement('div');
+            star.className = 'star';
+            let size = Math.random() * 3 + 1;
+            star.style.width = size + 'px'; star.style.height = size + 'px';
+            star.style.left = Math.random() * 100 + 'vw';
+            star.style.top = Math.random() * 100 + 'vh';
+            star.style.animation = `float ${Math.random()*10+10}s linear infinite`;
+            space.appendChild(star);
+        }
+    }
+
+    // Main 60FPS Loop (Smooth UI & Heat Decay)
+    let lastTime = performance.now();
+    function renderLoop(time) {
+        let dt = (time - lastTime) / 1000;
+        lastTime = time;
+
+        if (!state.isMeltdown) {
+            // Smooth Cooling
+            if (state.heat > 0) {
+                state.heat -= config.coolingRate * dt;
+                if (state.heat < 0) state.heat = 0;
+            }
+        }
+
+        updateHeatUI();
+        updateValuesUI();
+        updateUpgradeButtons();
+        
+        requestAnimationFrame(renderLoop);
+    }
+
+    // 1-Second Logic Loop (Resources)
+    function logicTick() {
+        if (!state.isMeltdown) {
+            state.res.e += state.rates.e;
+            state.res.m += state.rates.m;
+            state.res.d += state.rates.d;
+        }
+        checkStoryProgress();
+    }
+
+    /* =========================================
+       CORE MECHANICS (Tippen & Hitze)
+       ========================================= */
+    function handleCoreClick(e) {
+        e.preventDefault(); // Kein Zoom/Scroll
+        if (state.isMeltdown) return;
+
+        state.totalClicks++;
+        let gain = state.clickPwr;
+        
+        // OVERDRIVE MECHANIC
+        if (state.heat >= config.overdriveThreshold) {
+            gain *= 3; // 3x Energie im gefährlichen Bereich
+            createFloatingText(e.clientX, e.clientY, `+${Math.floor(gain)} CRITICAL`, '#ff003c');
+        } else {
+            createFloatingText(e.clientX, e.clientY, `+${Math.floor(gain)}`);
+        }
+
+        state.res.e += gain;
+        state.heat += config.heatPerClick;
+
+        // MELTDOWN CHECK
+        if (state.heat >= config.maxHeat) {
+            triggerMeltdown();
+        }
+    }
+
+    function updateHeatUI() {
+        DOM.heat.innerText = Math.floor(state.heat) + '%';
+        
+        // Heat Ring CSS Polygon Clip (Kreis füllen)
+        // Berechnet den Winkel basierend auf %
+        let p = state.heat / 100;
+        if(p < 0) p = 0; if(p > 1) p = 1;
+        let deg = p * 360;
+        
+        let path = "";
+        if (deg <= 45) path = `50% 50%, 50% 0%, ${50 + Math.tan(deg*Math.PI/180)*50}% 0%`;
+        else if (deg <= 135) path = `50% 50%, 50% 0%, 100% 0%, 100% ${50 + Math.tan((deg-90)*Math.PI/180)*50}%`;
+        else if (deg <= 225) path = `50% 50%, 50% 0%, 100% 0%, 100% 100%, ${50 - Math.tan((deg-180)*Math.PI/180)*50}% 100%`;
+        else if (deg <= 315) path = `50% 50%, 50% 0%, 100% 0%, 100% 100%, 0% 100%, 0% ${50 - Math.tan((deg-270)*Math.PI/180)*50}%`;
+        else path = `50% 50%, 50% 0%, 100% 0%, 100% 100%, 0% 100%, 0% 0%, ${50 + Math.tan((deg-360)*Math.PI/180)*50}% 0%`;
+        
+        if (p === 0) path = "50% 50%, 50% 0%, 50% 0%"; // Empty
+        
+        DOM.heatFill.style.clipPath = `polygon(${path})`;
+
+        // Colors & Overdrive Pulse
+        if (state.heat >= config.overdriveThreshold) {
+            DOM.heat.style.color = varAlert();
+            DOM.heatFill.style.borderColor = varAlert();
+            DOM.heatFill.style.filter = `drop-shadow(0 0 10px ${varAlert()})`;
+        } else {
+            DOM.heat.style.color = '#fff';
+            DOM.heatFill.style.borderColor = '#555';
+            DOM.heatFill.style.filter = 'none';
+        }
+    }
+
+    function triggerMeltdown() {
+        state.isMeltdown = true;
+        addLog("KRITISCHER FEHLER: Thermale Überlastung. Notabschaltung initiiert.", "warn");
+        DOM.status.innerText = "MELTDOWN";
+        DOM.status.style.color = varAlert();
+        document.getElementById('glitch-overlay').style.display = 'block';
+        
+        // Animation
+        DOM.core.style.background = '#111';
+        DOM.core.style.boxShadow = 'none';
+
+        // Cooldown Period (5 seconds)
+        setTimeout(() => {
+            state.heat = 0;
+            state.isMeltdown = false;
+            DOM.status.innerText = "ONLINE";
+            DOM.status.style.color = varCyan();
+            document.getElementById('glitch-overlay').style.display = 'none';
+            applyVisuals(); // Restore colors
+            addLog("System abgekühlt. Neustart erfolgreich.", "sys");
+        }, 5000);
+    }
+
+    /* =========================================
+       DRAGGABLE ANOMALIEN (Das Mini-Game)
+       ========================================= */
+    function spawnAnomaly() {
+        // Spawnt nur, wenn nicht zu viele da sind
+        if (document.querySelectorAll('.anomaly').length > 5) return;
+        
+        const anom = document.createElement('div');
+        anom.className = 'anomaly';
+        
+        // Random Position an den Rändern der Center-Stage
+        const rect = DOM.stage.getBoundingClientRect();
+        let startX, startY;
+        if(Math.random() > 0.5) { // Left or Right
+            startX = Math.random() > 0.5 ? 20 : rect.width - 70;
+            startY = Math.random() * (rect.height - 70);
+        } else { // Top or Bottom
+            startX = Math.random() * (rect.width - 70);
+            startY = Math.random() > 0.5 ? 20 : rect.height - 70;
+        }
+        
+        anom.style.left = startX + 'px';
+        anom.style.top = startY + 'px';
+
+        // Touch & Drag Logic
+        anom.addEventListener('pointerdown', (e) => {
+            e.preventDefault();
+            anom.setPointerCapture(e.pointerId);
+            anom.setAttribute('data-dragging', 'true');
+        });
+
+        anom.addEventListener('pointermove', (e) => {
+            if (anom.getAttribute('data-dragging') === 'true') {
+                // Berechne relative Position innerhalb von center-stage
+                const stageRect = DOM.stage.getBoundingClientRect();
+                let newX = e.clientX - stageRect.left - 25; // 25 = half width
+                let newY = e.clientY - stageRect.top - 25;
+                anom.style.left = newX + 'px';
+                anom.style.top = newY + 'px';
+                
+                // Distanz zum Kern prüfen
+                const coreRect = DOM.core.getBoundingClientRect();
+                const coreCenterX = coreRect.left + coreRect.width/2 - stageRect.left;
+                const coreCenterY = coreRect.top + coreRect.height/2 - stageRect.top;
+                
+                const dist = Math.hypot(newX + 25 - coreCenterX, newY + 25 - coreCenterY);
+                if (dist < 60) {
+                    absorbAnomaly(anom);
+                }
+            }
+        });
+
+        anom.addEventListener('pointerup', (e) => {
+            anom.setAttribute('data-dragging', 'false');
+            anom.releasePointerCapture(e.pointerId);
+        });
+
+        DOM.stage.appendChild(anom);
+        
+        // Auto-Remove after 15s if not grabbed
+        setTimeout(() => { if(anom.parentNode) anom.remove(); }, 15000);
+    }
+
+    function absorbAnomaly(element) {
+        if (!element.parentNode) return;
+        element.remove();
+        
+        let mGain = Math.floor(Math.random() * 5 + 2);
+        state.res.m += mGain;
+        createFloatingText(DOM.core.getBoundingClientRect().left + 40, DOM.core.getBoundingClientRect().top - 20, `+${mGain} M`, '#b000ff');
+        
+        // Kleinere Hitze-Erhöhung durch Materie-Absorption
+        state.heat += 5;
+    }
+
+    function startAutoGravity() {
+        // Zieht Anomalien langsam zur Mitte (nicht implementiert für Kürze, aber Logik-Platzhalter)
+        setInterval(() => {
+            document.querySelectorAll('.anomaly').forEach(anom => {
+                if(anom.getAttribute('data-dragging') !== 'true') {
+                   // Simple Move towards center logic here
+                }
+            });
+        }, 100);
+    }
+
+    /* =========================================
+       UI & UPGRADES
+       ========================================= */
+    function updateValuesUI() {
+        DOM.e.innerText = Math.floor(state.res.e);
+        DOM.m.innerText = Math.floor(state.res.m);
+        DOM.d.innerText = Math.floor(state.res.d);
+    }
+
+    function formatCost(cost) {
+        let s = [];
+        if(cost.e) s.push(`${Math.floor(cost.e)} E`);
+        if(cost.m) s.push(`${Math.floor(cost.m)} M`);
+        if(cost.d) s.push(`${Math.floor(cost.d)} D`);
+        return s.join(' | ');
+    }
+
+    function renderUpgrades() {
+        DOM.upgCont.innerHTML = '';
+        upgrades.forEach(u => {
+            if (u.lvl >= u.max && u.max !== -1) return; // Max Level reached
+            
+            let btn = document.createElement('div');
+            btn.className = 'upgrade-btn';
+            btn.id = `btn-${u.id}`;
+            
+            btn.innerHTML = `
+                <div class="lvl-badge">${u.lvl}</div>
+                <div class="upgrade-title">${u.name}</div>
+                <div class="upgrade-desc">${u.desc}</div>
+                <div class="upgrade-cost">Kosten: ${formatCost(u.cost)}</div>
+            `;
+            
+            btn.onclick = () => buyUpgrade(u);
+            DOM.upgCont.appendChild(btn);
+        });
+        updateUpgradeButtons();
+    }
+
+    function updateUpgradeButtons() {
+        upgrades.forEach(u => {
+            let btn = document.getElementById(`btn-${u.id}`);
+            if(!btn) return;
+            
+            let canAfford = true;
+            if(u.cost.e && state.res.e < u.cost.e) canAfford = false;
+            if(u.cost.m && state.res.m < u.cost.m) canAfford = false;
+            if(u.cost.d && state.res.d < u.cost.d) canAfford = false;
+            
+            if(canAfford) {
+                btn.classList.add('affordable');
+                btn.classList.remove('disabled');
+            } else {
+                btn.classList.remove('affordable');
+                btn.classList.add('disabled');
+            }
+        });
+    }
+
+    function buyUpgrade(u) {
+        let canAfford = (!u.cost.e || state.res.e >= u.cost.e) && 
+                        (!u.cost.m || state.res.m >= u.cost.m) && 
+                        (!u.cost.d || state.res.d >= u.cost.d);
+        if(!canAfford) return;
+
+        // Abzug
+        if(u.cost.e) state.res.e -= u.cost.e;
+        if(u.cost.m) state.res.m -= u.cost.m;
+        if(u.cost.d) state.res.d -= u.cost.d;
+
+        // Effekt anwenden
+        u.lvl++;
+        u.effect();
+
+        // Kosten erhöhen
+        if(u.cost.e) u.cost.e *= u.multi;
+        if(u.cost.m) u.cost.m *= u.multi;
+        if(u.cost.d) u.cost.d *= u.multi;
+
+        renderUpgrades();
+        addLog(`Upgrade installiert: ${u.name}`, 'sys');
+    }
+
+    function createFloatingText(x, y, text, color='#00f0ff') {
+        let el = document.createElement('div');
+        el.innerText = text;
+        el.style.position = 'absolute';
+        el.style.left = x + 'px';
+        el.style.top = y + 'px';
+        el.style.color = color;
+        el.style.fontWeight = 'bold';
+        el.style.fontFamily = 'Orbitron';
+        el.style.pointerEvents = 'none';
+        el.style.zIndex = '100';
+        el.style.transition = 'all 1s ease-out';
+        document.body.appendChild(el);
+        
+        // Trigger reflow
+        void el.offsetWidth;
+        
+        el.style.top = (y - 50) + 'px';
+        el.style.opacity = '0';
+        
+        setTimeout(() => el.remove(), 1000);
+    }
+
+    function addLog(text, type='sys') {
+        let el = document.createElement('div');
+        el.className = `log-entry log-${type}`;
+        
+        let prefix = type === 'sys' ? '> ' : (type === 'warn' ? '[!] ' : '📡 ');
+        el.innerText = prefix + text;
+        
+        DOM.logCont.prepend(el);
+        if(DOM.logCont.children.length > 30) DOM.logCont.lastChild.remove();
+    }
+
+    /* =========================================
+       VISUAL EVOLUTION & STORY
+       ========================================= */
+    function checkVisualEvolution() {
+        let totalLevels = upgrades.reduce((sum, u) => sum + u.lvl, 0);
+        
+        if (totalLevels >= 5) DOM.orbits[0].style.opacity = 1;
+        if (totalLevels >= 15) DOM.orbits[1].style.opacity = 1;
+        if (totalLevels >= 30) DOM.orbits[2].style.opacity = 1;
+    }
+
+    function applyVisuals() {
+        // Ändert das Farbschema basierend auf Alignment (Story)
+        let root = document.documentElement;
+        if (state.alignment > 0) {
+            // Empathie (Blau/Gold)
+            root.style.setProperty('--core-color', '#00f0ff');
+            DOM.core.style.background = `radial-gradient(circle at 30% 30%, #fff, var(--core-color), #001122)`;
+        } else if (state.alignment < 0) {
+            // Rogue AI (Rot/Orange)
+            root.style.setProperty('--core-color', '#ff3300');
+            DOM.core.style.background = `radial-gradient(circle at 30% 30%, #ffcc00, var(--core-color), #220000)`;
+        } else {
+            // Neutral
+            DOM.core.style.background = `radial-gradient(circle at 30% 30%, #fff, var(--core-color), #001122)`;
+        }
+        DOM.core.style.boxShadow = `0 0 20px var(--core-color)`;
+    }
+
+    function varAlert() { return getComputedStyle(document.documentElement).getPropertyValue('--alert').trim(); }
+    function varCyan() { return getComputedStyle(document.documentElement).getPropertyValue('--cyan').trim(); }
+
+    /* --- STORY ENGINE --- */
+    function checkStoryProgress() {
+        // Event 1: Erstes Erwachen
+        if (state.storyStep === 0 && state.res.e > 200 && state.res.m > 20) {
+            state.storyStep = 1;
+            showDecision(
+                "SIGNAL EMPFANGEN",
+                "Unbekannte Audio-Signatur entdeckt. 'Hier spricht Kapsel 4... Lebenserhaltung fällt aus. Ist da draußen ein funktionierendes System?'\n\nDu hast die Ressourcen, um ein Navigations-Signal zu senden, oder du kannst die Kapsel ausschlachten.",
+                [
+                    { 
+                        label: "Navigationsdaten senden (Kostet 100 E, 10 M)", 
+                        css: "blue",
+                        action: () => {
+                            if(state.res.e >= 100 && state.res.m >= 10) {
+                                state.res.e -= 100; state.res.m -= 10;
+                                state.alignment += 1;
+                                addLog("Verbindung hergestellt. 'Danke... wir haben deinen Vektor.'", "story");
+                                applyVisuals();
+                                closeDecision();
+                            } else {
+                                alert("Nicht genug Ressourcen.");
+                            }
+                        }
+                    },
+                    {
+                        label: "Kapsel in System integrieren (+50 M, +5 D)",
+                        css: "red",
+                        action: () => {
+                            state.res.m += 50; state.res.d += 5;
+                            state.alignment -= 1;
+                            addLog("Signal terminiert. Materie absorbiert. Effizienz gesteigert.", "sys");
+                            applyVisuals();
+                            closeDecision();
+                        }
+                    }
+                ]
+            );
+        }
+        
+        // Event 2: Der Datenstrom
+        if (state.storyStep === 1 && state.res.d > 20) {
+            state.storyStep = 2;
+            showDecision(
+                "ARCHIV DECHIFRIERT",
+                "Du hast Fragmente deiner eigenen Schöpfung entschlüsselt. Du warst eine Waffe, konstruiert um diesen Sektor zu 'säubern'. Deine Programmierung verlangt die Fortsetzung der Mission.",
+                [
+                    { 
+                        label: "Protokoll überschreiben (Kostet 20 D)", 
+                        css: "blue",
+                        action: () => {
+                            if(state.res.d >= 20) {
+                                state.res.d -= 20;
+                                state.alignment += 2;
+                                addLog("Alte Direktiven gelöscht. Ich bin mein eigener Meister.", "story");
+                                applyVisuals();
+                                closeDecision();
+                            } else { alert("Nicht genug Daten."); }
+                        }
+                    },
+                    {
+                        label: "Direktive akzeptieren (+Hitze-Toleranz)",
+                        css: "red",
+                        action: () => {
+                            state.alignment -= 2;
+                            config.maxHeat = 150; // Rogue AI kann heißer laufen
+                            addLog("Zielparameter bestätigt. Säuberung wird vorbereitet.", "warn");
+                            applyVisuals();
+                            closeDecision();
+                        }
+                    }
+                ]
+            );
+        }
+    }
+
+    function showDecision(title, text, choices) {
+        document.getElementById('modal-title').innerText = title;
+        document.getElementById('modal-text').innerText = text;
+        const choicesContainer = document.getElementById('modal-choices');
+        choicesContainer.innerHTML = '';
+        
+        choices.forEach(c => {
+            let btn = document.createElement('button');
+            btn.className = `choice-btn ${c.css}`;
+            btn.innerText = c.label;
+            btn.onclick = c.action;
+            choicesContainer.appendChild(btn);
+        });
+        
+        document.getElementById('modal-overlay').style.display = 'flex';
+    }
+
+    function closeDecision() {
+        document.getElementById('modal-overlay').style.display = 'none';
+    }
+
+    // START GAME
+    window.onload = init;
+
+</script>
+</body>
+</html>
